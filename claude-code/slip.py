@@ -122,6 +122,8 @@ def cmd_list(app_dir: Path) -> None:
             continue
         reports.append(load_report(md, app_dir))
 
+    annotate_with_receipts(reports, app_dir)
+
     # Exact-duplicate hint: notes whose normalized text matches across the batch.
     # A cheap signal for Claude's clustering — semantic dedupe stays Claude's job.
     by_text: dict[str, list[str]] = {}
@@ -135,6 +137,7 @@ def cmd_list(app_dir: Path) -> None:
     out = {
         "appDir": str(app_dir),
         "reportCount": len(reports),
+        "pendingReportCount": sum(1 for r in reports if not r["fullyHandled"]),
         "noteCount": sum(len(r["notes"]) for r in reports),
         "duplicateHints": dup_hints,
         "reports": reports,
@@ -245,6 +248,48 @@ def normalize(text: str) -> str:
 # receipt
 # ---------------------------------------------------------------------------
 
+def receipt_filename(report: str) -> str:
+    """Flat, collision-free receipt name from a report's relative path — so nested
+    folder-per-export bundles (all named notes.md) don't clobber each other on a
+    shared `notes.result.json`."""
+    stem = report[:-3] if report.endswith(".md") else report
+    return stem.replace("/", "-").replace("\\", "-") + ".result.json"
+
+
+def receipt_statuses(report_rel: str, app_dir: Path) -> dict:
+    """noteId (or note index for legacy reports) -> last status, from this report's
+    receipt if one exists."""
+    receipt = app_dir / "_results" / receipt_filename(report_rel)
+    if not receipt.exists():
+        return {}
+    try:
+        data = json.loads(receipt.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+    statuses = {}
+    for i, r in enumerate(data.get("results", [])):
+        key = r.get("noteId")
+        statuses[key if key is not None else i] = r.get("status")
+    return statuses
+
+
+def annotate_with_receipts(reports: list[dict], app_dir: Path) -> None:
+    """Tag each note with its last receipt `priorStatus`, and mark reports already
+    fully handled — so a re-run skips finished work instead of re-analyzing it.
+    fixed/wont_fix/duplicate are terminal."""
+    terminal = {"fixed", "wont_fix", "duplicate"}
+    for rep in reports:
+        statuses = receipt_statuses(rep["report"], app_dir)
+        handled = 0
+        for i, note in enumerate(rep["notes"]):
+            key = note["id"] if note["id"] is not None else i
+            note["priorStatus"] = statuses.get(key)
+            if note["priorStatus"] in terminal:
+                handled += 1
+        rep["pendingCount"] = len(rep["notes"]) - handled
+        rep["fullyHandled"] = len(rep["notes"]) > 0 and handled == len(rep["notes"])
+
+
 def cmd_receipt(app_dir: Path, report: str, results_path: str, agent: str) -> None:
     md = (app_dir / report).resolve()
     if not md.exists():
@@ -271,7 +316,7 @@ def cmd_receipt(app_dir: Path, report: str, results_path: str, agent: str) -> No
     }
     results_dir = app_dir / "_results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    dest = results_dir / (Path(report).stem + ".result.json")
+    dest = results_dir / receipt_filename(report)
     dest.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n")
     print(str(dest))
 
@@ -317,8 +362,28 @@ def cmd_archive(app_dir: Path, report: str, dry_run: bool) -> None:
         if not dry_run:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dest))
+    # Drop a now-empty folder-per-export dir (e.g. 2026-07-16-1608/ + its images/);
+    # no-op for the flat layout where the report sits directly in the app folder.
+    pruned = False
+    if not dry_run:
+        pruned = prune_empty_report_dir(md.parent, app_dir)
     print(json.dumps({"report": report, "date": date, "dryRun": dry_run,
-                      "moved": moved}, indent=2, ensure_ascii=False))
+                      "moved": moved, "prunedEmptyDir": pruned}, indent=2, ensure_ascii=False))
+
+
+def prune_empty_report_dir(report_dir: Path, app_dir: Path) -> bool:
+    """After archiving a folder-per-export bundle, remove its now-empty source dir
+    (and any emptied images/ inside). No-op when the report sits directly in the app
+    folder (flat layout) or if any real file remains. Tolerates lone .DS_Store."""
+    report_dir = report_dir.resolve()
+    app_dir = app_dir.resolve()
+    if report_dir == app_dir or app_dir not in report_dir.parents:
+        return False
+    for path in report_dir.rglob("*"):
+        if path.is_file() and path.name != ".DS_Store":
+            return False  # real content remains — leave it alone
+    shutil.rmtree(report_dir, ignore_errors=True)
+    return True
 
 
 def archive_date(md: Path) -> str:

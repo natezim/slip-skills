@@ -32,9 +32,14 @@ python3 ~/.claude/skills/slip/slip.py list
 ```
 **Usually zero setup:** it auto-detects the export folder by matching the current project directory's
 name to a subfolder of `~/Dropbox/Slip`. A `.claude/slip.json` is only needed when the repo name
-differs from the app's export folder (it then names the `app`). Emits JSON: `reports[]`, each with
-`notes[]` (`id`, `tags`, `text`, absolute `images[]`), a `hasStableIds` flag, and top-level
-`duplicateHints`. If `reportCount` is 0, say "nothing new in the Slip folder" and stop.
+differs from the app's export folder (it then names the `app`). Emits JSON: top-level `reportCount`, `pendingReportCount`, `duplicateHints`, and `reports[]`. Each
+report has `fullyHandled`, `pendingCount`, and `notes[]` (`id`, `tags`, `text`, absolute `images[]`,
+plus `priorStatus` from any past receipt). A `hasStableIds` flag marks legacy reports. If
+`reportCount` is 0, say "nothing new in the Slip folder" and stop.
+
+**Use the receipt signals to skip finished work:** archive any report with `fullyHandled: true`
+straight away — its notes are already resolved, don't re-read them. Within a partial report, only work
+notes whose `priorStatus` isn't already `fixed`/`wont_fix`/`duplicate`.
 
 If it can't tell which app folder to use, the script lists the available ones. Pick the obvious match
 and re-run with `--app-dir <path>` — or, to make it stick, add `.claude/slip.json`:
