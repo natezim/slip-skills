@@ -3,31 +3,36 @@
 A full skill: `/slip` reads a fresh batch of field reports, dedupes, fixes what's fixable, verifies,
 writes a resolution receipt, and archives the sources.
 
-## Install
+## Install (once, globally)
 
-Copy this folder's files into your project:
+Install the skill at the user level so `/slip` works in **every** project — no per-repo setup:
 
 ```
-your-project/
-└── .claude/
-    ├── slip.json                 # ← from slip.json below
-    └── skills/
-        └── slip/
-            ├── SKILL.md          # ← this folder's SKILL.md
-            └── slip.py           # ← this folder's slip.py
+~/.claude/
+└── skills/
+    └── slip/
+        ├── SKILL.md          # ← this folder's SKILL.md
+        └── slip.py           # ← this folder's slip.py
 ```
 
-Then create `.claude/slip.json` pointing at your Slip export folder:
+```sh
+mkdir -p ~/.claude/skills/slip
+cp claude-code/SKILL.md claude-code/slip.py ~/.claude/skills/slip/
+```
+
+## Config: usually none
+
+The skill **auto-detects** your export folder by matching the current project directory's name to a
+subfolder of `~/Dropbox/Slip`. So a repo named after its app just works.
+
+You only need a config when the repo name **differs** from the app's export folder (e.g. repo
+`DevThought`, app folder `Slip`). Then add `.claude/slip.json` in that repo:
 
 ```json
-{
-  "dropRoot": "~/Dropbox/Slip",
-  "app": "YourAppName"
-}
+{ "app": "Slip" }
 ```
 
-- `dropRoot` is the folder Slip exports into (the parent that contains one subfolder per app).
-- `app` is the subfolder for this project — Slip names it after your project.
+(Add `"dropRoot": "~/somewhere/else"` too if you don't export to `~/Dropbox/Slip`.)
 
 ## Use
 
@@ -53,4 +58,4 @@ Stdlib-only, three commands:
 - `receipt --app-dir DIR --report R --results F` → writes `_results/R.result.json`.
 - `archive --app-dir DIR --report R` → moves a resolved report to `_archive/<date>/` (never deletes).
 
-`--app-dir` overrides the folder from `slip.json`.
+`--app-dir` overrides both auto-detect and `slip.json`.

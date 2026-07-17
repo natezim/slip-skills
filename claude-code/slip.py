@@ -28,6 +28,7 @@ SCHEMA_VERSION = 1
 APP_NAME = "Slip"
 RESERVED_DIRS = {"_archive", "_results", "images"}
 RESERVED_FILES = {"README.md"}  # the self-describing export README, not a report
+DEFAULT_DROP_ROOT = "~/Dropbox/Slip"  # where Slip exports; one subfolder per app
 TIMESTAMP_RE = re.compile(r"(\d{4}-\d{2}-\d{2})-\d{4}")
 HEADING_RE = re.compile(r"^##\s+\d+\.\s*(.*)$")
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
@@ -38,19 +39,63 @@ IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 # ---------------------------------------------------------------------------
 
 def resolve_app_dir(explicit: str | None, config_path: str) -> Path:
-    """The <dropRoot>/<app> folder to operate on. Explicit flag wins; otherwise
-    read .claude/slip.json."""
+    """The <dropRoot>/<app> folder to operate on.
+
+    Resolution order: an explicit --app-dir wins; then `.claude/slip.json` (an
+    override for when the repo name doesn't match the export folder); otherwise
+    zero-config auto-detect — look for a drop-root subfolder named after the
+    current project directory. So a repo named after its app "just works" with no
+    setup, and only mismatched names need a config.
+    """
     if explicit:
         return Path(os.path.expanduser(explicit)).resolve()
+
+    # Config is optional now — it overrides auto-detect.
+    drop_root = DEFAULT_DROP_ROOT
+    app = None
     cfg = Path(config_path)
-    if not cfg.exists():
-        fail(f"No --app-dir given and config not found at {config_path}")
-    data = json.loads(cfg.read_text())
-    root = os.path.expanduser(data.get("dropRoot", ""))
-    app = data.get("app", "")
-    if not root or not app:
-        fail(f"{config_path} must define both 'dropRoot' and 'app'")
-    return (Path(root) / app).resolve()
+    if cfg.exists():
+        data = json.loads(cfg.read_text())
+        drop_root = data.get("dropRoot") or DEFAULT_DROP_ROOT
+        app = (data.get("app") or "").strip() or None
+
+    root = Path(os.path.expanduser(drop_root))
+    if app:
+        return (root / app).resolve()
+
+    # Auto-detect: a drop folder named after the project we're working in?
+    cwd_name = Path.cwd().name
+    match = match_app_folder(root, cwd_name)
+    if match:
+        return match.resolve()
+
+    available = app_folders(root)
+    hint = f" Available: {', '.join(available)}." if available else ""
+    fail(
+        f"Couldn't tell which Slip app folder to use for '{cwd_name}'. No folder in "
+        f"{root} matches it, and no 'app' set in {config_path}.{hint} "
+        "Add .claude/slip.json with an \"app\", or pass --app-dir."
+    )
+
+
+def app_folders(root: Path) -> list[str]:
+    """User-facing app subfolders under the drop root (skips reserved/hidden)."""
+    if not root.exists():
+        return []
+    return sorted(
+        p.name for p in root.iterdir()
+        if p.is_dir() and not p.name.startswith((".", "_"))
+    )
+
+
+def match_app_folder(root: Path, name: str) -> Path | None:
+    """Case-insensitive exact match of `name` against a drop-root subfolder."""
+    if not root.exists():
+        return None
+    for p in sorted(root.iterdir()):
+        if p.is_dir() and p.name.lower() == name.lower() and not p.name.startswith((".", "_")):
+            return p
+    return None
 
 
 def fail(msg: str) -> "None":

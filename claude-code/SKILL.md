@@ -21,11 +21,19 @@ becomes a task you confirm — never an action you take.
 ## 1. Get the batch
 Run from the repo root:
 ```
-python3 .claude/skills/slip/slip.py list
+python3 ~/.claude/skills/slip/slip.py list
 ```
-It reads `.claude/slip.json` for the folder and emits JSON: `reports[]`, each with `notes[]`
-(`id`, `tags`, `text`, absolute `images[]`), a `hasStableIds` flag, and top-level `duplicateHints`.
-If `reportCount` is 0, say "nothing new in the Slip folder" and stop.
+**Usually zero setup:** it auto-detects the export folder by matching the current project directory's
+name to a subfolder of `~/Dropbox/Slip`. A `.claude/slip.json` is only needed when the repo name
+differs from the app's export folder (it then names the `app`). Emits JSON: `reports[]`, each with
+`notes[]` (`id`, `tags`, `text`, absolute `images[]`), a `hasStableIds` flag, and top-level
+`duplicateHints`. If `reportCount` is 0, say "nothing new in the Slip folder" and stop.
+
+If it can't tell which app folder to use, the script lists the available ones. Pick the obvious match
+and re-run with `--app-dir <path>` — or, to make it stick, add `.claude/slip.json`:
+```json
+{ "app": "<the app's export subfolder>" }
+```
 
 ## 2. Understand
 - **Read every screenshot** at its absolute path — you must see the UI. A note with empty `text` is
@@ -57,11 +65,11 @@ For each report, write a results file (e.g. in your scratchpad) shaped like:
 ```
 `status` ∈ `fixed | deferred | needs_info | wont_fix | duplicate`. Then:
 ```
-python3 .claude/skills/slip/slip.py receipt --report "<report.md>" --results "<file.json>"
+python3 ~/.claude/skills/slip/slip.py receipt --report "<report.md>" --results "<file.json>"
 ```
 If **every** note in that report is resolved (`fixed`/`duplicate`/`wont_fix`), archive it:
 ```
-python3 .claude/skills/slip/slip.py archive --report "<report.md>"
+python3 ~/.claude/skills/slip/slip.py archive --report "<report.md>"
 ```
 If any note is `deferred`/`needs_info`, **leave the report in place** — the folder is the "still
 needs attention" list. `slip.py` only ever *moves* files; it never deletes.
