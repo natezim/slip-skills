@@ -3,9 +3,9 @@
 Ready-made integrations for closing the **Slip** field-report loop with your AI coding tool.
 
 [Slip](https://github.com/natezim/Slip) captures bugs and ideas on your phone and exports them as
-plain files — Markdown reports, a JSON sidecar per export, and screenshots. Any tool (or a person)
-can read them, fix the issues, and write a small **receipt** back so Slip marks them ✅ resolved in a
-"Fixes" tab.
+plain files — dated Markdown reports (each note's stable `id` embedded as an HTML comment) and
+screenshots. Any tool (or a person) can read them, fix the issues, and write a small **receipt** back
+so Slip marks them ✅ resolved in a "Fixes" tab.
 
 No backend, no account, no API key — just files in a folder you already sync (Dropbox, iCloud,
 Drive…).
@@ -39,7 +39,7 @@ After fixing a note, write `_results/<report-name>.result.json`:
   "project": "<project>",
   "results": [
     {
-      "noteId": "<id from the note's .json sidecar>",
+      "noteId": "<id from the note's <!-- id: … --> comment>",
       "status": "fixed",
       "commit": "<commit sha, optional>",
       "summary": "<one line, optional>"

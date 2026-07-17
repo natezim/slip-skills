@@ -5,13 +5,14 @@ Drop this file at your repo root (Codex reads `AGENTS.md`). Set the export path 
 ## Field reports
 
 Bug/idea reports captured with the Slip app live in `~/Dropbox/Slip/<App>/` (edit to your path).
-Layout: dated `*.md` reports, a same-named `*.json` sidecar with a stable `id` per note, a shared
-`images/` folder, and reserved `_results/` and `_archive/` dirs.
+Layout: dated `*.md` reports under `<yyyy-MM-dd>/` day-folders, each note's stable `id` embedded as
+an `<!-- id: … -->` HTML comment after its heading; screenshots in the day's `images/`; a reserved
+`_results/` dir for receipts.
 
 When asked to handle Slip reports:
 
-1. Read the pending reports — everything in the folder except `_archive/`, `_results/`, and
-   `README.md`. Prefer the `.json` sidecars (easiest to parse); open referenced screenshots.
+1. Read the pending reports — every `*.md` except `README.md`, skipping the reserved `_results/` and
+   `images/` dirs. Open referenced screenshots.
 2. Dedupe notes describing the same issue, then fix what's clearly fixable. Ask before anything
    ambiguous or risky.
 3. For each report, write a receipt to `_results/<report-name>.result.json`:
@@ -21,7 +22,7 @@ When asked to handle Slip reports:
      "schema": 1,
      "project": "<App>",
      "results": [
-       { "noteId": "<id from the sidecar>", "status": "fixed",
+       { "noteId": "<id from the note's <!-- id: … --> comment>", "status": "fixed",
          "commit": "<sha>", "summary": "<one line>" }
      ]
    }

@@ -3,15 +3,19 @@
 
 The judgment (dedupe, fixing, verifying) is Claude's job. This script owns only
 the parts that must be exact: discovering pending reports, emitting them as clean
-structured JSON, writing schema-correct resolution receipts, and archiving
-resolved sources. Stdlib only. See docs/field-report-loop.md for the contract.
+structured JSON, and writing schema-correct resolution receipts. Stdlib only.
+See docs/field-report-loop.md for the contract.
+
+Reports are immutable, per-day-organized markdown (schema 2): each note's stable
+`id` is embedded as an HTML comment after its heading — no `.json` sidecar. Old
+exports (flat `.md` + `.json` sidecars) still parse; the sidecar reader is kept
+as a fallback. Nothing is moved or archived: receipts are the state, and the
+phone ages reports out by retention.
 
 Subcommands:
-  list      Emit JSON of pending reports (prefers the .json sidecar; parses .md
-            for legacy exports that predate sidecars).
+  list      Emit JSON of pending reports (reads embedded id comments; falls back
+            to the .json sidecar for legacy exports, then to plain markdown).
   receipt   Write _results/<report>.result.json from a results file.
-  archive   Move a resolved report (.md + .json + referenced images) into
-            _archive/<YYYY-MM-DD>/, preserving structure. Never deletes.
 """
 from __future__ import annotations
 
@@ -19,19 +23,22 @@ import argparse
 import json
 import os
 import re
-import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 1  # receipt schema (independent of the export/report schema)
 APP_NAME = "Slip"
-RESERVED_DIRS = {"_archive", "_results", "images"}
+RESERVED_DIRS = {"_results", "images"}
 RESERVED_FILES = {"README.md"}  # the self-describing export README, not a report
 DEFAULT_DROP_ROOT = "~/Dropbox/Slip"  # where Slip exports; one subfolder per app
-TIMESTAMP_RE = re.compile(r"(\d{4}-\d{2}-\d{2})-\d{4}")
 HEADING_RE = re.compile(r"^##\s+\d+\.\s*(.*)$")
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+# The per-note machine tag Slip embeds after each heading (schema 2), e.g.
+#   <!-- id: 2AB1F73C-EE11-4273-8653-F2C3C322C6BD captured: 2026-07-17T17:30:00Z -->
+ID_COMMENT_RE = re.compile(
+    r"<!--\s*id:\s*([0-9A-Fa-f-]{36})(?:\s+captured:\s*(\S+))?\s*-->"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -146,15 +153,21 @@ def cmd_list(app_dir: Path) -> None:
 
 
 def load_report(md: Path, app_dir: Path) -> dict:
-    sidecar = md.with_suffix(".json")
+    """Prefer embedded id comments in the markdown (schema 2). Fall back to a
+    legacy `.json` sidecar if present, then to plain markdown with no ids."""
     rel = str(md.relative_to(app_dir))
+    report = report_from_markdown(md, app_dir, rel)
+    if report["hasStableIds"]:
+        return report  # schema 2 — ids embedded in the markdown
+
+    sidecar = md.with_suffix(".json")
     if sidecar.exists():
         try:
             data = json.loads(sidecar.read_text())
             return report_from_sidecar(data, md, sidecar, app_dir, rel)
         except (json.JSONDecodeError, KeyError):
-            pass  # fall through to markdown parse
-    return report_from_markdown(md, app_dir, rel)
+            pass  # fall through to the (id-less) markdown parse
+    return report
 
 
 def report_from_sidecar(data: dict, md: Path, sidecar: Path, app_dir: Path, rel: str) -> dict:
@@ -184,14 +197,22 @@ def report_from_markdown(md: Path, app_dir: Path, rel: str) -> dict:
     text = md.read_text(encoding="utf-8", errors="replace")
     front, body = split_frontmatter(text)
     notes = parse_markdown_notes(body, md)
+    has_ids = any(n["id"] for n in notes)
+    schema = front.get("schema")
+    try:
+        schema = int(schema) if schema is not None else None
+    except (TypeError, ValueError):
+        pass
     return {
         "report": rel,
         "sidecar": None,
-        "schema": None,
-        "hasStableIds": False,  # legacy export — phone can't match these by id
+        "schema": schema,
+        # schema 2 embeds a stable id per note; a legacy export (no id comments,
+        # no sidecar) can't be matched back by the phone.
+        "hasStableIds": has_ids,
         "project": front.get("project"),
         "exportedAt": front.get("exported") or front.get("captured"),
-        "device": None,
+        "device": front.get("device"),
         "notes": notes,
     }
 
@@ -228,6 +249,10 @@ def parse_markdown_notes(body: str, md: Path) -> list[dict]:
 
 
 def markdown_note(index: int, chunk: str, md: Path, tag_hint: str) -> dict:
+    # Pull the stable id (and capture time) out of the embedded comment, then
+    # strip the comment so it never leaks into the note text.
+    note_id, captured = parse_id_comment(chunk)
+    chunk = ID_COMMENT_RE.sub("", chunk)
     images = [str((md.parent / m).resolve()) for m in IMAGE_RE.findall(chunk)]
     text = IMAGE_RE.sub("", chunk).strip()
     if text == "_(no note)_":
@@ -236,8 +261,17 @@ def markdown_note(index: int, chunk: str, md: Path, tag_hint: str) -> dict:
     tags = []
     if "·" in tag_hint:
         tags = [t.strip() for t in tag_hint.split("·", 1)[1].split(",") if t.strip()]
-    return {"index": index, "id": None, "capturedAt": None, "tags": tags,
+    return {"index": index, "id": note_id, "capturedAt": captured, "tags": tags,
             "text": text, "images": images}
+
+
+def parse_id_comment(chunk: str) -> tuple[str | None, str | None]:
+    """(noteId, capturedAt) from the first `<!-- id: … captured: … -->` in a
+    chunk, or (None, None) for a legacy report without one."""
+    m = ID_COMMENT_RE.search(chunk)
+    if not m:
+        return None, None
+    return m.group(1), m.group(2)
 
 
 def normalize(text: str) -> str:
@@ -249,9 +283,9 @@ def normalize(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 def receipt_filename(report: str) -> str:
-    """Flat, collision-free receipt name from a report's relative path — so nested
-    folder-per-export bundles (all named notes.md) don't clobber each other on a
-    shared `notes.result.json`."""
+    """Flat, collision-free receipt name from a report's relative path — so
+    per-day reports (e.g. `2026-07-17/1731-slug.md`) map to a unique, date-led
+    `2026-07-17-1731-slug.result.json` that never clobbers another day's."""
     stem = report[:-3] if report.endswith(".md") else report
     return stem.replace("/", "-").replace("\\", "-") + ".result.json"
 
@@ -301,9 +335,13 @@ def cmd_receipt(app_dir: Path, report: str, results_path: str, agent: str) -> No
 
     project = results_data.get("project") if isinstance(results_data, dict) else None
     if not project:
-        sidecar = md.with_suffix(".json")
-        if sidecar.exists():
-            project = json.loads(sidecar.read_text()).get("project")
+        # Prefer the report's own frontmatter; fall back to a legacy sidecar.
+        front, _ = split_frontmatter(md.read_text(encoding="utf-8", errors="replace"))
+        project = front.get("project")
+        if not project:
+            sidecar = md.with_suffix(".json")
+            if sidecar.exists():
+                project = json.loads(sidecar.read_text()).get("project")
 
     receipt = {
         "schema": SCHEMA_VERSION,
@@ -334,79 +372,6 @@ def clean_result(r: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# archive
-# ---------------------------------------------------------------------------
-
-def cmd_archive(app_dir: Path, report: str, dry_run: bool) -> None:
-    md = (app_dir / report).resolve()
-    if not md.exists():
-        fail(f"report not found: {report}")
-
-    date = archive_date(md)
-    dest_root = app_dir / "_archive" / date
-
-    # The file set: the .md, its sidecar, and every referenced image.
-    members = [md]
-    sidecar = md.with_suffix(".json")
-    if sidecar.exists():
-        members.append(sidecar)
-    for img in referenced_images(md):
-        if img.exists():
-            members.append(img)
-
-    moved = []
-    for src in members:
-        rel = src.resolve().relative_to(app_dir)
-        dest = dest_root / rel
-        moved.append((str(rel), str(dest.relative_to(app_dir))))
-        if not dry_run:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(src), str(dest))
-    # Drop a now-empty folder-per-export dir (e.g. 2026-07-16-1608/ + its images/);
-    # no-op for the flat layout where the report sits directly in the app folder.
-    pruned = False
-    if not dry_run:
-        pruned = prune_empty_report_dir(md.parent, app_dir)
-    print(json.dumps({"report": report, "date": date, "dryRun": dry_run,
-                      "moved": moved, "prunedEmptyDir": pruned}, indent=2, ensure_ascii=False))
-
-
-def prune_empty_report_dir(report_dir: Path, app_dir: Path) -> bool:
-    """After archiving a folder-per-export bundle, remove its now-empty source dir
-    (and any emptied images/ inside). No-op when the report sits directly in the app
-    folder (flat layout) or if any real file remains. Tolerates lone .DS_Store."""
-    report_dir = report_dir.resolve()
-    app_dir = app_dir.resolve()
-    if report_dir == app_dir or app_dir not in report_dir.parents:
-        return False
-    for path in report_dir.rglob("*"):
-        if path.is_file() and path.name != ".DS_Store":
-            return False  # real content remains — leave it alone
-    shutil.rmtree(report_dir, ignore_errors=True)
-    return True
-
-
-def archive_date(md: Path) -> str:
-    m = TIMESTAMP_RE.match(md.name)
-    if m:
-        return m.group(1)
-    return datetime.now().strftime("%Y-%m-%d")
-
-
-def referenced_images(md: Path) -> list[Path]:
-    sidecar = md.with_suffix(".json")
-    if sidecar.exists():
-        try:
-            data = json.loads(sidecar.read_text())
-            refs = [img for n in data.get("notes", []) for img in n.get("images", [])]
-            return [(md.parent / r) for r in refs]
-        except json.JSONDecodeError:
-            pass
-    text = md.read_text(encoding="utf-8", errors="replace")
-    return [(md.parent / r) for r in IMAGE_RE.findall(text)]
-
-
-# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -423,10 +388,6 @@ def main() -> None:
     pr.add_argument("--results", required=True, help="JSON file with the results array")
     pr.add_argument("--agent", default="claude-code:slip", help="Resolver identifier")
 
-    pa = sub.add_parser("archive", help="Move a resolved report to _archive/<date>/")
-    pa.add_argument("--report", required=True, help="Report path relative to app dir")
-    pa.add_argument("--dry-run", action="store_true", help="Show moves without doing them")
-
     args = p.parse_args()
     app_dir = resolve_app_dir(args.app_dir, args.config)
 
@@ -434,8 +395,6 @@ def main() -> None:
         cmd_list(app_dir)
     elif args.cmd == "receipt":
         cmd_receipt(app_dir, args.report, args.results, args.agent)
-    elif args.cmd == "archive":
-        cmd_archive(app_dir, args.report, args.dry_run)
 
 
 if __name__ == "__main__":

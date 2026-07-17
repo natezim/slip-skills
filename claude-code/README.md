@@ -1,7 +1,7 @@
 # Slip × Claude Code
 
 A full skill: `/slip` reads a fresh batch of field reports, dedupes, fixes what's fixable, verifies,
-writes a resolution receipt, and archives the sources.
+and writes a resolution receipt. Reports stay put — receipts carry the state.
 
 ## Install (once, globally)
 
@@ -44,18 +44,18 @@ In Claude Code, run:
 
 It will:
 
-1. List the new reports (`slip.py list`) — prefers the JSON sidecar, falls back to parsing markdown.
+1. List the new reports (`slip.py list`) — reads the embedded id comments (falls back to a legacy
+   `.json` sidecar, then plain markdown).
 2. Read the notes and screenshots, dedupe, and map each to your code.
 3. Fix what's clear, verify, and stop-and-ask on anything risky.
-4. Write a receipt (`slip.py receipt`) and archive resolved sources (`slip.py archive`) — which is
-   what lights up the **Fixes** tab back in the app.
+4. Write a receipt (`slip.py receipt`) — which is what lights up the **Fixes** tab back in the app.
+   Reports are immutable and dated; the phone ages old ones out by its retention window.
 
 ## The helper (`slip.py`)
 
-Stdlib-only, three commands:
+Stdlib-only, two commands:
 
 - `list --app-dir DIR` → structured JSON of pending reports.
-- `receipt --app-dir DIR --report R --results F` → writes `_results/R.result.json`.
-- `archive --app-dir DIR --report R` → moves a resolved report to `_archive/<date>/` (never deletes).
+- `receipt --app-dir DIR --report R --results F` → writes `_results/<flattened-R>.result.json`.
 
 `--app-dir` overrides both auto-detect and `slip.json`.

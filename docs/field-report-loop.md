@@ -11,81 +11,104 @@ optional way to set it — written by any tool that speaks this format: a CI job
 different agent, or the Claude Code `slip` skill (the reference implementation, used by the app's
 author). The app never assumes Claude Code, or any resolver, exists.
 
-Both the Swift app and any resolver code against the formats defined here. Bump `schema` when a
-format changes.
+Both the Swift app and any resolver code against the formats defined here. The **report/export
+format is `schema: 2`**; the **receipt format is its own `schema: 1`** (they version independently).
 
 ## Folder layout (per project, in the user's chosen folder)
 
+Exports are **immutable, per-day-organized markdown**. One layout for every destination (custom
+folder, the app's iCloud container, and share):
+
 ```
 Slip/<Project>/
-├── <timestamp>-<slug>.md          # human-readable field report (existing)
-├── <timestamp>-<slug>.json        # NEW machine sidecar — same basename as the .md
-├── images/
-│   └── <timestamp>-NNN.png        # shared, timestamp-prefixed (existing)
-├── _results/                      # receipts written by Claude, read by the phone
-│   └── <timestamp>-<slug>.result.json
-└── _archive/<YYYY-MM-DD>/         # sources Claude moved here after resolving (folder hygiene)
+├── 2026-07-17/
+│   ├── 1731-weird-space.md        # one report per send; <HHmm>-<slug>.md
+│   └── images/
+│       └── 1731-001.png           # screenshots, HHmm-prefixed, co-located in the day
+├── 2026-07-18/
+│   └── 0904-action-section.md
+├── _results/                      # receipts written by a resolver, read by the phone
+│   └── 2026-07-17-1731-weird-space.result.json
+└── README.md                      # self-describing; regenerated on every export
 ```
 
-- `<timestamp>` = `yyyy-MM-dd-HHmm` (matches `BundleBuilder.timestamp`).
-- The `.md` is unchanged and stays the nice human artifact. The `.json` is authoritative for the agent.
-- `_results/` and `_archive/` are reserved dir names; discovery on both sides ignores them as reports.
+- One report file per **send**, inside a `<yyyy-MM-dd>/` day-folder; images live in that day's
+  `images/`, prefixed with the send's `HHmm` so several sends in a day never collide.
+- **Bounded & self-organizing:** ~1 folder/day. The app purges whole day-folders older than its
+  retention window — that's the only cleanup; nothing is ever moved or archived.
+- `_results/` and `images/` are reserved names; discovery on both sides ignores them as reports.
 
-## Sidecar — `<timestamp>-<slug>.json` (written by Slip)
+## Report — `<day>/<HHmm>-<slug>.md` (written by Slip)
 
-Authoritative machine form of one export. `id` per note is the keystone: it survives re-export,
-enables dedupe, and is the key the receipt joins back on.
+Human-readable **and** machine-parseable. Machine metadata rides in the YAML frontmatter, and each
+note's stable `id` is embedded as an HTML comment right after its heading — invisible when the
+markdown is read, trivial to parse. **There is no `.json` sidecar.**
 
-```json
-{
-  "schema": 1,
-  "app": "Slip",
-  "project": "Slip",
-  "exportId": "5D9C…",                       // UUID for this export event
-  "exportedAt": "2026-07-17T11:17:00Z",      // ISO-8601 UTC
-  "source": "Slip (iOS capture inbox)",
-  "device": {
-    "model": "iPhone16,2",
-    "os": "iOS 26.0",
-    "appVersion": "1.2.0",
-    "build": "148"
-  },
-  "notes": [
-    {
-      "id": "9F3A…",                          // BugNote.id (UUID), stable
-      "capturedAt": "2026-07-17T11:15:00Z",
-      "tags": ["bug"],                        // freeform; may be []
-      "text": "Still showing the weird id instead of the Dropbox folder name",
-      "images": ["images/2026-07-17-1117-001.png"]  // paths relative to the .md
-    }
-  ]
-}
+```markdown
+---
+schema: 2
+project: Slip
+exported: 2026-07-17T21:31:08Z
+device: { model: iPhone16,2, os: iOS 26.5, app: "1.0 (148)" }
+source: Slip (iOS capture inbox)
+tags: [bug, idea]
+notes: 2
+---
+
+# Slip — Field Report
+Captured 2026-07-17 • 2 notes • tags: bug (1), idea (1)
+
+---
+
+## 1. 5:30 PM · bug
+<!-- id: 2AB1F73C-EE11-4273-8653-F2C3C322C6BD captured: 2026-07-17T17:30:00Z -->
+This has a lot of weird space in it…
+
+![screenshot](images/1731-001.png)
+
+## 2. 5:31 PM · idea
+<!-- id: 9F3A0000-0000-0000-0000-000000000002 captured: 2026-07-17T17:31:00Z -->
+Add a compact mode.
+```
+
+The per-note id comment:
+
+```
+<!-- id: <UUID> captured: <ISO-8601 UTC> -->
 ```
 
 Rules:
-- `text` is the raw note (empty string allowed → screenshot-only note; `images` is then the content).
-- `images` paths are relative to the sidecar/`.md` location so they resolve identically for both.
-- Everything in the `.md` is derivable from the sidecar; the sidecar never omits a note the `.md` has.
+- `id` is the originating `BugNote.id` (UUID) — stable across re-export, the key a receipt joins on.
+- The comment sits between a note's `## N.` heading and its body; strip it before treating the rest
+  as note text.
+- An empty note body (`_(no note)_`) means a **screenshot-only** capture; the image is the content.
+- `images` paths are relative to the report `.md`, so they resolve the same for a person or a tool.
 
-## Receipt — `_results/<timestamp>-<slug>.result.json` (written by Claude, read by Slip)
+**Back-compat:** older exports were a flat `<timestamp>-<slug>.md` plus a `<timestamp>-<slug>.json`
+sidecar (report `schema: 1`). Resolvers should still read that sidecar when a report has no embedded
+id comments. Those legacy reports age out via retention; no migration is performed.
 
-One receipt per report processed. Joins to notes by `noteId`.
+## Receipt — `_results/<report-name>.result.json` (written by the resolver, read by Slip)
+
+One receipt per report processed. The name is the report's relative path flattened with `-`, so a
+per-day report maps to a unique, date-led receipt (`2026-07-17/1731-weird-space.md` →
+`2026-07-17-1731-weird-space.result.json`). Joins to notes by `noteId`.
 
 ```json
 {
   "schema": 1,
   "app": "Slip",
   "project": "Slip",
-  "sourceReport": "2026-07-17-1117-start-a-note-from-a-screenshot.md",
+  "sourceReport": "2026-07-17/1731-weird-space.md",
   "processedAt": "2026-07-17T15:02:00Z",
   "agent": "claude-code:slip",
   "results": [
     {
-      "noteId": "9F3A…",
+      "noteId": "2AB1F73C-EE11-4273-8653-F2C3C322C6BD",
       "status": "fixed",                      // fixed | deferred | needs_info | wont_fix | duplicate
       "commit": "abc1234",                    // present when status == fixed (may be null pre-commit)
-      "filesTouched": ["DevThought/Slip/Export/ExportDestination.swift"],
-      "summary": "Opaque Dropbox ID now resolves to the real folder name.",
+      "filesTouched": ["DevThought/Slip/Export/BundleBuilder.swift"],
+      "summary": "Whitespace is now trimmed on export.",
       "duplicateOf": null,                    // noteId, when status == duplicate
       "question": null                        // string, when status == needs_info
     }
@@ -105,15 +128,19 @@ clears its resolved status and pulls it back out of the Fixes box.
 ## Loop, end to end
 
 1. **Capture** (phone) — note created; optional on-device tidy/auto-tag runs at finalize.
-2. **Export** (phone) — writes `.md` + `.json` sidecar + images to `Slip/<Project>/`.
-3. **Fix** (`slip` skill, Mac) — parse sidecars, dedupe/cluster, fix, **verify**, commit.
-4. **Receipt** (skill) — write `_results/…result.json`; move resolved sources to `_archive/<date>/`.
+2. **Export** (phone) — writes `<day>/<HHmm>-<slug>.md` (ids embedded) + images to `Slip/<Project>/`.
+3. **Fix** (resolver, e.g. the `slip` skill on the Mac) — parse reports, dedupe/cluster, fix,
+   **verify**, commit.
+4. **Receipt** (resolver) — write `_results/…result.json`. Nothing is moved: the receipt is the state.
 5. **Confirm** (phone) — watch the folder, join receipts by `noteId`, mark Resolved, populate Fixes box.
+
+`slip.py list` reads receipts and reports `priorStatus` per note + `fullyHandled` per report, so a
+re-run skips finished work without moving anything.
 
 ## Invariants
 
 - Files are the only channel. Either side may be offline; state reconciles on next read.
-- `noteId` is the single join key across all four files. Never reuse or rewrite it.
-- Reserved dirs (`_results/`, `_archive/`, `images/`) are never treated as reports.
-- Nothing is hard-deleted by either side without explicit user action; "cleanup" always means *move*.
-```
+- `noteId` is the single join key across report and receipt. Never reuse or rewrite it.
+- Reports are **immutable and dated**. Reserved names (`_results/`, `images/`) are never reports.
+- **Receipts are the state; nothing is archived.** Old reports disappear only by the app's retention
+  (it deletes whole day-folders, and ages out receipts), never by a resolver moving or deleting them.
