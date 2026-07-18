@@ -67,12 +67,33 @@ and re-run with `--app-dir <path>` — or, to make it stick, add `.claude/slip.j
 - **Work out what they're asking for**, not just which bucket it falls in. A note can be a defect
   report, a feature ask, a question to answer, a direction to explore, or a half-formed thought that
   wants talking through before any code exists. Answer the prompt that was written.
-- **These are dictated or thumbed out one-handed** — expect loose phrasing and transcription
-  wobble ("phantom buttons", "a folder that biscuits moved to"). Read for intent and reconstruct the
-  obvious word; don't take a garbled literal and go build the wrong thing. If intent genuinely
-  can't be recovered, that's a question for §4, not a guess.
 - Tags are freeform (Slip seeds only `bug`/`idea`). Untagged? Infer softly: wrong-behavior wording
   → bug; wants ("I want", "add") → idea/feature.
+
+**Expect speech-to-text damage — most notes are dictated.** Slip's capture is voice-first, so what
+you're reading is a transcript, not considered prose. The words may be wrong even when the thought
+is clear. Read through the noise:
+
+- **Filler is not hedging.** "um", "uh", "like", "kind of", "essentially", "I mean" are artifacts of
+  talking, not signals of doubt. Don't downgrade a firm request to a tentative maybe because it
+  arrived with a verbal tic — and don't flatten a genuine "maybe" into a decision either.
+- **Nouns get mangled, technical ones worst.** Product names, identifiers, filenames and UI labels
+  come back as near-homophones — "a folder that *biscuits* moved to" is *pictures*. The screenshot
+  and the codebase are your correction dictionary: if a garbled word maps cleanly onto a real
+  element on screen or a real symbol in the repo, that's almost certainly the word.
+- **Watch for dropped negations.** "can't" heard as "can" inverts the entire meaning. If a note
+  reads as a bizarre request, re-read it with the negation restored and see if it suddenly makes
+  sense.
+- **No punctuation means run-ons.** One note may be two thoughts fused together. Split it into
+  separate items when it is, instead of answering only the half you parsed first.
+- **Recordings get cut off.** A note ending mid-thought is truncated, not complete — treat the
+  missing part as unknown rather than inventing an ending.
+
+Reconstruct silently when the intended word is obvious. But when the reconstruction would change
+*what you build* rather than just the phrasing, don't guess — put it in the §4 quiz and let the user
+confirm. And when you write it back (the plan, the receipt `summary`, a commit message), use the
+clean reconstructed wording — never quote the garbled literal back as though it were their
+considered phrasing.
 
 ## 3. Dedupe / cluster
 Use `duplicateHints` plus your own reading to merge notes describing the **same underlying issue**
