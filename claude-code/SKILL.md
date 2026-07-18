@@ -4,7 +4,9 @@ description: >
   Process Slip field reports — the bug/idea batches captured on the phone with the Slip app and
   exported to a Dropbox/iCloud folder. Use when the user says "/slip", "check the Slip folder",
   "triage my field reports", "fix the bugs I sent from my phone", or similar. Reads the batch
-  (screenshots included), dedupes, fixes what's fixable, verifies, then writes a resolution receipt.
+  (screenshots included), dedupes, then plans the whole batch and asks any open questions as
+  multiple-choice before building. Fixes what's fixable, verifies, commits and pushes each fix as its
+  own revertable commit, then writes a resolution receipt.
   Read-only against the reports except the receipt it writes — nothing is moved or deleted.
 ---
 
@@ -59,20 +61,68 @@ Use `duplicateHints` plus your own reading to merge notes describing the **same 
 (a batch may report one bug several times). Fix it **once**; the extra notes get `status: duplicate`
 pointing at the primary note's `noteId`.
 
-## 4. Triage → fix → verify
-- Map each cluster to real code (`file:line`, not guesses). Present a short severity-ordered plan
-  (bugs before ideas; data-loss > crash > broken-interaction > cosmetic), then implement.
-- **Verify before calling anything done** — drive the fix through the repo's `verify`/`run` skill or
-  build+tests. "Fixed" means observed working, not just edited.
-- Ambiguous, risky, or low-confidence? **Stop and ask.** That note becomes `deferred` or `needs_info`
-  (put the question in the `question` field), not a guessed fix.
+## 4. Plan the batch — and ask in quiz form
+Never go straight from reading to editing. Turn the batch into a **plan**, put it in front of the
+user, and clear every open question *before* touching code.
 
-## 5. Write receipts
+**Build the plan.** One line per cluster (§3), severity-ordered — bugs before ideas; within bugs,
+data-loss > crash > broken-interaction > cosmetic. For each cluster give: what it is, the note(s)
+behind it, the real code it maps to (`file:line`, never a guess), and the intended fix in a sentence.
+Mark each as bug or idea, and flag anything you'd otherwise be guessing at.
+
+**Ask with the AskUserQuestion tool — quiz form, never buried in prose.** Whenever you need the user,
+ask as multiple choice: 2–4 concrete options, your recommendation first and labelled
+"(Recommended)", each option spelling out what it actually means and its trade-off. Batch related
+questions into one call instead of drip-feeding them. Ask when:
+- a note is ambiguous or reads more than one way — which behaviour did they mean?
+- an idea has several plausible designs — which shape do they want?
+- the fix is risky, sweeping, or a matter of taste (UI/UX, naming, defaults);
+- scope is unclear — everything this round, or just the bugs?
+
+**Read the code before asking** — never spend a question on something the codebase already answers
+(a note may describe as missing something that already exists, or exists but isn't discoverable;
+find out which, then ask about the real gap). Spend the user's attention only on judgment and taste.
+
+**Agree on the plan before implementing.** Present the ordered plan so the user can cut, reorder, or
+defer items, then work it top-down. Anything they decline to settle becomes `deferred` or
+`needs_info`, with the open question in the receipt's `question` field — never a guessed fix.
+
+## 5. Fix → verify
+- Work the agreed plan in order, fixing each cluster **once**.
+- **Verify before calling anything done** — drive the fix through the repo's `verify`/`run` skill or
+  build+tests. "Fixed" means observed working, not just edited. If you could only get as far as a
+  clean build, say so plainly rather than implying it was exercised.
+- New ambiguity surfacing mid-fix? Go back to §4 and ask — don't guess your way forward.
+
+## 6. Commit — one cluster, one commit
+Commit and push each verified fix **separately**. One cluster (§3) = one commit, so any single
+field-report fix can be rolled back on its own with `git revert <sha>` without unpicking the rest of
+the batch. Never fold a whole batch into one commit, and never mix a fix with unrelated work.
+
+Per cluster, in order:
+1. **Verify first** (§5). Never commit a red build — if it doesn't pass, the note is `deferred`, not
+   committed.
+2. **Stage by name** — `git add -- <file> …`. Never `git add -A` / `.`; that sweeps up whatever else
+   is in the tree.
+3. **Commit** in the repo's own conventions (defer to CLAUDE.md / AGENTS.md when present). Identify
+   the note in the body so the commit traces back to the report:
+   `Field-report: <day>/<report>.md (note <noteId>)`
+4. **Push** before starting the next cluster, so a long batch is never all-or-nothing.
+
+Then carry the SHA into the receipt for every note in the cluster — that makes the receipt the
+rollback index (duplicates carry the primary's SHA). A cluster spanning two repos can't be atomic:
+commit once per repo, and say so in both messages and in the wrap-up.
+
+Hold — don't commit — when the work is half-done, the build is red, or the diff mixes in WIP you
+didn't author and can't cleanly separate. Say so instead.
+
+## 7. Write receipts
 For each report you worked, write a results file (e.g. in your scratchpad) shaped like:
 ```json
 { "project": "Slip", "results": [
   { "noteId": "<from list, or null for legacy>", "status": "fixed",
-    "commit": "abc1234 or null if uncommitted", "filesTouched": ["path"],
+    "commit": "abc1234 — the commit that fixed THIS note; null if uncommitted",
+    "filesTouched": ["path"],
     "summary": "one line", "duplicateOf": null, "question": null }
 ] }
 ```
@@ -87,7 +137,9 @@ step**: reports are immutable and dated, receipts carry the state, and the phone
 day-folders on its retention window. A report with `deferred`/`needs_info` notes just stays pending
 until a later run resolves it (put the open question in the `question` field).
 
-## 6. Wrap up
-Report what was fixed (files touched), receipts written, and what's left + why. For any report with
-`hasStableIds: false` (a legacy export with no embedded id and no sidecar), note that the phone can't
-reflect its status back — those notes have no stable IDs to match. Don't `git commit` unless asked.
+## 8. Wrap up
+Report what was fixed (files touched), receipts written, and what's left + why. List each commit as
+`<sha> — <what it fixed>`, and name the repo it landed in when the workspace has more than one, so
+rolling any single fix back is one lookup. For any report with `hasStableIds: false` (a legacy export
+with no embedded id and no sidecar), note that the phone can't reflect its status back — those notes
+have no stable IDs to match.
