@@ -115,6 +115,18 @@ def is_reserved(path: Path, app_dir: Path) -> bool:
     return any(part in RESERVED_DIRS for part in rel_parts[:-1])
 
 
+def is_noise(name: str) -> bool:
+    """Non-report markdown to skip: README variants (including Dropbox's
+    "README (… conflicted copy).md" duplicates) and other cloud sync artifacts —
+    which otherwise leak in as bogus, id-less "reports"."""
+    low = name.lower()
+    return (
+        low.startswith("readme")
+        or "conflicted copy" in low        # Dropbox
+        or ".sync-conflict" in low         # Syncthing
+    )
+
+
 # ---------------------------------------------------------------------------
 # list
 # ---------------------------------------------------------------------------
@@ -125,7 +137,7 @@ def cmd_list(app_dir: Path) -> None:
 
     reports = []
     for md in sorted(app_dir.rglob("*.md")):
-        if md.name in RESERVED_FILES or is_reserved(md, app_dir):
+        if md.name in RESERVED_FILES or is_reserved(md, app_dir) or is_noise(md.name):
             continue
         reports.append(load_report(md, app_dir))
 
