@@ -64,6 +64,8 @@ not terminal, so those notes come back). A `hasStableIds` flag marks legacy repo
 stable id to reflect status back). If `pendingReportCount` is 0, say "nothing new in the Slip folder"
 and stop — even when `reportCount` is high, that just means the backlog is fully resolved.
 
+A pending note may also carry **`possibleRepeatOf`** — see §3.
+
 Add `--all` to include the closed-out reports and notes in full. It costs real context, so reach for
 it only on demand: chasing what a past run decided, or checking whether a new note contradicts a
 resolved one. Never as the default opening move.
@@ -113,6 +115,18 @@ considered phrasing.
 Use `duplicateHints` plus your own reading to merge notes describing the **same underlying issue**
 (a batch may report one bug several times). Fix it **once**; the extra notes get `status: duplicate`
 pointing at the primary note's `noteId`.
+
+**`possibleRepeatOf` means the opposite of "already handled."** A pending note carrying it closely
+echoes one that a past receipt already closed — the hint gives you that note's id, report, status,
+`summary` and `commit`. The user is telling you a second time about something the receipts claim is
+done, and the most likely explanation is that **the earlier fix didn't hold**. So go look: read the
+named commit, exercise the behaviour, and treat the new note as live work. Resolving it `duplicate`
+on the strength of the old receipt is the one move that turns a real regression into a silently
+closed note — only do it once you've confirmed the current code genuinely does the right thing.
+
+It's a lexical match, so **read it in one direction only**. When it fires, it's worth checking. When
+it doesn't, that tells you nothing: it catches re-dictations in near-identical words and misses the
+same complaint genuinely rephrased. Never infer "no hint, so this is new."
 
 ## 4. Plan the batch — and ask in quiz form
 Never go straight from reading to editing. Turn the batch into a **plan**, put it in front of the

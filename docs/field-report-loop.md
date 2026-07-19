@@ -140,6 +140,12 @@ moving anything, and without spending the resolver's context on it. `--all` opts
 whole history. `fixed`/`wont_fix`/`duplicate` close a note out; `deferred`/`needs_info` leave it
 pending for a later run.
 
+Because a closed note's text is no longer shown, `list` carries one signal back across that edge: a
+pending note that closely echoes a closed one gets `possibleRepeatOf`, naming the earlier note and
+the outcome its receipt recorded. It is a lexical match — a re-report in near-identical words fires
+it, a genuine rephrasing doesn't — so it flags work worth re-checking and never certifies that
+anything is new.
+
 ## Invariants
 
 - Files are the only channel. Either side may be offline; state reconciles on next read.

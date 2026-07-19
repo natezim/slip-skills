@@ -20,6 +20,7 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 import re
@@ -35,6 +36,10 @@ DEFAULT_DROP_ROOT = "~/Dropbox/Slip"  # where Slip exports; one subfolder per ap
 # Receipt statuses that close a note out for good. `deferred`/`needs_info` do not —
 # those stay pending until a later run resolves them.
 TERMINAL_STATUSES = {"fixed", "wont_fix", "duplicate"}
+# A pending note this similar to an already-closed one is probably the same
+# complaint arriving twice — which usually means the first fix didn't take.
+REPEAT_SIMILARITY = 0.75
+MIN_REPEAT_MATCH_CHARS = 25  # below this, short notes match each other on noise
 HEADING_RE = re.compile(r"^##\s+\d+\.\s*(.*)$")
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 # The per-note machine tag Slip embeds after each heading (schema 2), e.g.
@@ -156,6 +161,12 @@ def cmd_list(app_dir: Path, include_all: bool = False) -> None:
                 by_text.setdefault(key, []).append(note["id"] or f'{rep["report"]}#{note["index"]}')
     dup_hints = [ids for ids in by_text.values() if len(ids) > 1]
 
+    if include_all:
+        visible = reports
+    else:
+        closed = resolved_index(reports, app_dir)
+        visible = [pending_view(with_repeat_hints(r, closed)) for r in reports]
+
     out = {
         "appDir": str(app_dir),
         "filter": "all" if include_all else "pending",
@@ -164,7 +175,7 @@ def cmd_list(app_dir: Path, include_all: bool = False) -> None:
         "noteCount": sum(len(r["notes"]) for r in reports),
         "pendingNoteCount": sum(r["pendingCount"] for r in reports),
         "duplicateHints": dup_hints,
-        "reports": reports if include_all else [pending_view(r) for r in reports],
+        "reports": visible,
     }
     print(json.dumps(out, indent=2, ensure_ascii=False))
 
@@ -182,6 +193,72 @@ def pending_view(report: dict) -> dict:
         }
     open_notes = [n for n in report["notes"] if n["priorStatus"] not in TERMINAL_STATUSES]
     return {**report, "notes": open_notes, "noteCount": len(report["notes"])}
+
+
+def resolved_index(reports: list[dict], app_dir: Path) -> list[dict]:
+    """Every already-closed note, with the outcome its receipt recorded. Built from
+    the unfiltered reports so it still sees what `pending_view` is about to drop."""
+    index = []
+    for rep in reports:
+        results = receipt_results(rep["report"], app_dir)
+        for i, note in enumerate(rep["notes"]):
+            if note["priorStatus"] not in TERMINAL_STATUSES:
+                continue
+            record = results.get(note["id"] if note["id"] is not None else i) or {}
+            index.append({
+                "noteId": note["id"],
+                "report": rep["report"],
+                "status": note["priorStatus"],
+                "summary": record.get("summary", ""),
+                "commit": record.get("commit"),
+                "normalized": normalize(note["text"]),
+            })
+    return index
+
+
+def repeat_hint(text: str, index: list[dict]) -> dict | None:
+    """The closest already-closed note that this pending one looks like a re-report
+    of, or None. Cheap ratios prefilter before the real (quadratic) comparison."""
+    normalized = normalize(text)
+    if len(normalized) < MIN_REPEAT_MATCH_CHARS:
+        return None  # too short to match on anything but noise
+    best, best_score = None, 0.0
+    for candidate in index:
+        other = candidate["normalized"]
+        if len(other) < MIN_REPEAT_MATCH_CHARS:
+            continue
+        matcher = difflib.SequenceMatcher(None, normalized, other)
+        if (matcher.real_quick_ratio() < REPEAT_SIMILARITY
+                or matcher.quick_ratio() < REPEAT_SIMILARITY):
+            continue
+        score = matcher.ratio()
+        if score >= REPEAT_SIMILARITY and score > best_score:
+            best, best_score = candidate, score
+    if best is None:
+        return None
+    return {
+        "noteId": best["noteId"],
+        "report": best["report"],
+        "status": best["status"],
+        "summary": best["summary"],
+        "commit": best["commit"],
+        "similarity": round(best_score, 2),
+    }
+
+
+def with_repeat_hints(report: dict, index: list[dict]) -> dict:
+    """Flag pending notes that echo something already closed out. The hint is a
+    prompt to check whether that earlier fix actually held — never a licence to
+    close the new note on the strength of the old receipt."""
+    if report["fullyHandled"]:
+        return report
+    notes = []
+    for note in report["notes"]:
+        hint = None
+        if note["priorStatus"] not in TERMINAL_STATUSES:
+            hint = repeat_hint(note["text"], index)
+        notes.append({**note, "possibleRepeatOf": hint} if hint else note)
+    return {**report, "notes": notes}
 
 
 def load_report(md: Path, app_dir: Path) -> dict:
@@ -322,9 +399,9 @@ def receipt_filename(report: str) -> str:
     return stem.replace("/", "-").replace("\\", "-") + ".result.json"
 
 
-def receipt_statuses(report_rel: str, app_dir: Path) -> dict:
-    """noteId (or note index for legacy reports) -> last status, from this report's
-    receipt if one exists."""
+def receipt_results(report_rel: str, app_dir: Path) -> dict:
+    """noteId (or note index for legacy reports) -> that note's last receipt record,
+    from this report's receipt if one exists."""
     receipt = app_dir / "_results" / receipt_filename(report_rel)
     if not receipt.exists():
         return {}
@@ -332,22 +409,22 @@ def receipt_statuses(report_rel: str, app_dir: Path) -> dict:
         data = json.loads(receipt.read_text())
     except (json.JSONDecodeError, OSError):
         return {}
-    statuses = {}
+    results = {}
     for i, r in enumerate(data.get("results", [])):
         key = r.get("noteId")
-        statuses[key if key is not None else i] = r.get("status")
-    return statuses
+        results[key if key is not None else i] = r
+    return results
 
 
 def annotate_with_receipts(reports: list[dict], app_dir: Path) -> None:
     """Tag each note with its last receipt `priorStatus`, and mark reports already
     fully handled — so a re-run skips finished work instead of re-analyzing it."""
     for rep in reports:
-        statuses = receipt_statuses(rep["report"], app_dir)
+        results = receipt_results(rep["report"], app_dir)
         handled = 0
         for i, note in enumerate(rep["notes"]):
             key = note["id"] if note["id"] is not None else i
-            note["priorStatus"] = statuses.get(key)
+            note["priorStatus"] = (results.get(key) or {}).get("status")
             if note["priorStatus"] in TERMINAL_STATUSES:
                 handled += 1
         rep["pendingCount"] = len(rep["notes"]) - handled
