@@ -134,8 +134,11 @@ clears its resolved status and pulls it back out of the Fixes box.
 4. **Receipt** (resolver) — write `_results/…result.json`. Nothing is moved: the receipt is the state.
 5. **Confirm** (phone) — watch the folder, join receipts by `noteId`, mark Resolved, populate Fixes box.
 
-`slip.py list` reads receipts and reports `priorStatus` per note + `fullyHandled` per report, so a
-re-run skips finished work without moving anything.
+`slip.py list` reads receipts and emits only the open work — a fully-resolved report collapses to a
+counts-only stub, a partly-done one drops its closed notes — so a re-run skips finished work without
+moving anything, and without spending the resolver's context on it. `--all` opts back in to the
+whole history. `fixed`/`wont_fix`/`duplicate` close a note out; `deferred`/`needs_info` leave it
+pending for a later run.
 
 ## Invariants
 

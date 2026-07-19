@@ -32,6 +32,9 @@ APP_NAME = "Slip"
 RESERVED_DIRS = {"_results", "images"}
 RESERVED_FILES = {"README.md"}  # the self-describing export README, not a report
 DEFAULT_DROP_ROOT = "~/Dropbox/Slip"  # where Slip exports; one subfolder per app
+# Receipt statuses that close a note out for good. `deferred`/`needs_info` do not —
+# those stay pending until a later run resolves them.
+TERMINAL_STATUSES = {"fixed", "wont_fix", "duplicate"}
 HEADING_RE = re.compile(r"^##\s+\d+\.\s*(.*)$")
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 # The per-note machine tag Slip embeds after each heading (schema 2), e.g.
@@ -131,7 +134,7 @@ def is_noise(name: str) -> bool:
 # list
 # ---------------------------------------------------------------------------
 
-def cmd_list(app_dir: Path) -> None:
+def cmd_list(app_dir: Path, include_all: bool = False) -> None:
     if not app_dir.exists():
         fail(f"app folder not found: {app_dir}")
 
@@ -155,13 +158,30 @@ def cmd_list(app_dir: Path) -> None:
 
     out = {
         "appDir": str(app_dir),
+        "filter": "all" if include_all else "pending",
         "reportCount": len(reports),
         "pendingReportCount": sum(1 for r in reports if not r["fullyHandled"]),
         "noteCount": sum(len(r["notes"]) for r in reports),
+        "pendingNoteCount": sum(r["pendingCount"] for r in reports),
         "duplicateHints": dup_hints,
-        "reports": reports,
+        "reports": reports if include_all else [pending_view(r) for r in reports],
     }
     print(json.dumps(out, indent=2, ensure_ascii=False))
+
+
+def pending_view(report: dict) -> dict:
+    """Drop work the receipts already closed out, so a re-run doesn't pay context
+    for it. A fully handled report collapses to a stub — enough to count and name,
+    with no note text or image paths; a partial one keeps only its open notes."""
+    if report["fullyHandled"]:
+        return {
+            "report": report["report"],
+            "noteCount": len(report["notes"]),
+            "pendingCount": 0,
+            "fullyHandled": True,
+        }
+    open_notes = [n for n in report["notes"] if n["priorStatus"] not in TERMINAL_STATUSES]
+    return {**report, "notes": open_notes, "noteCount": len(report["notes"])}
 
 
 def load_report(md: Path, app_dir: Path) -> dict:
@@ -321,16 +341,14 @@ def receipt_statuses(report_rel: str, app_dir: Path) -> dict:
 
 def annotate_with_receipts(reports: list[dict], app_dir: Path) -> None:
     """Tag each note with its last receipt `priorStatus`, and mark reports already
-    fully handled — so a re-run skips finished work instead of re-analyzing it.
-    fixed/wont_fix/duplicate are terminal."""
-    terminal = {"fixed", "wont_fix", "duplicate"}
+    fully handled — so a re-run skips finished work instead of re-analyzing it."""
     for rep in reports:
         statuses = receipt_statuses(rep["report"], app_dir)
         handled = 0
         for i, note in enumerate(rep["notes"]):
             key = note["id"] if note["id"] is not None else i
             note["priorStatus"] = statuses.get(key)
-            if note["priorStatus"] in terminal:
+            if note["priorStatus"] in TERMINAL_STATUSES:
                 handled += 1
         rep["pendingCount"] = len(rep["notes"]) - handled
         rep["fullyHandled"] = len(rep["notes"]) > 0 and handled == len(rep["notes"])
@@ -393,7 +411,9 @@ def main() -> None:
     p.add_argument("--config", default=".claude/slip.json", help="Path to slip.json")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("list", help="Emit pending reports as JSON")
+    pl = sub.add_parser("list", help="Emit pending reports as JSON")
+    pl.add_argument("--all", action="store_true",
+                    help="Include reports and notes the receipts already closed out")
 
     pr = sub.add_parser("receipt", help="Write a resolution receipt")
     pr.add_argument("--report", required=True, help="Report path relative to app dir")
@@ -404,7 +424,7 @@ def main() -> None:
     app_dir = resolve_app_dir(args.app_dir, args.config)
 
     if args.cmd == "list":
-        cmd_list(app_dir)
+        cmd_list(app_dir, include_all=args.all)
     elif args.cmd == "receipt":
         cmd_receipt(app_dir, args.report, args.results, args.agent)
 

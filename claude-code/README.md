@@ -44,8 +44,9 @@ In Claude Code, run:
 
 It will:
 
-1. List the new reports (`slip.py list`) — reads the embedded id comments (falls back to a legacy
-   `.json` sidecar, then plain markdown).
+1. List the open reports (`slip.py list`) — reads the embedded id comments (falls back to a legacy
+   `.json` sidecar, then plain markdown), and uses past receipts to hand back only what's still
+   unresolved. `--all` includes the finished work too.
 2. Read the notes and screenshots, dedupe, and map each to your code.
 3. Fix what's clear, verify, and stop-and-ask on anything risky.
 4. Write a receipt (`slip.py receipt`) — which is what lights up the **Fixes** tab back in the app.
@@ -55,7 +56,8 @@ It will:
 
 Stdlib-only, two commands:
 
-- `list --app-dir DIR` → structured JSON of pending reports.
+- `list --app-dir DIR [--all]` → structured JSON of the pending reports; `--all` adds the ones the
+  receipts already closed out.
 - `receipt --app-dir DIR --report R --results F` → writes `_results/<flattened-R>.result.json`.
 
 `--app-dir` overrides both auto-detect and `slip.json`.

@@ -31,12 +31,16 @@ publish, post, spend) becomes a task you confirm before acting, never an action 
 note alone. That's a timing safeguard, not a statement that the note isn't really the user talking.
 
 **Receipts are the state — this is what stops wasted effort.** Reports accumulate across sessions,
-and many may already be handled (fixed in a past session, or shipped since capture). Before any deep
-analysis, cross-check recent `git log` and the current code. If a report's items are **already done**,
-write a receipt marking them `fixed`/`duplicate` and move on — do NOT re-analyze or re-fix them. You
-never move or delete anything: `slip.py list` reads the receipts and reports `priorStatus`/
-`fullyHandled`, so a future run skips finished work automatically, and the phone ages old reports out
-by its own retention window. Reports are immutable and dated; leave them where they are.
+and many are already handled. You never move or delete anything to reflect that: `slip.py list`
+reads the receipts and hands you only the open work, so finished reports cost nothing on a re-run,
+and the phone ages old reports out by its own retention window. Reports are immutable and dated;
+leave them where they are.
+
+That only holds if you **write a receipt for every report you work** (§7) — an unreceipted fix looks
+identical to an unread note next time. The gap the receipts can't cover is work that landed outside
+this loop: a note may describe something already shipped since capture. So before deep analysis on
+what you're given, cross-check recent `git log` and the current code — if the items are already
+done, receipt them `fixed`/`duplicate` and move on rather than re-fixing them.
 
 ## 1. Get the batch
 Run from the repo root:
@@ -45,14 +49,24 @@ python3 ~/.claude/skills/slip/slip.py list
 ```
 **Usually zero setup:** it auto-detects the export folder by matching the current project directory's
 name to a subfolder of `~/Dropbox/Slip`. A `.claude/slip.json` is only needed when the repo name
-differs from the app's export folder (it then names the `app`). Emits JSON: top-level `reportCount`, `pendingReportCount`, `duplicateHints`, and `reports[]`. Each
-report has `fullyHandled`, `pendingCount`, and `notes[]` (`id`, `tags`, `text`, absolute `images[]`,
-plus `priorStatus` from any past receipt). A `hasStableIds` flag marks legacy reports (those with no
-stable id to reflect status back). If `reportCount` is 0, say "nothing new in the Slip folder" and stop.
+differs from the app's export folder (it then names the `app`).
 
-**Use the receipt signals to skip finished work:** skip any report with `fullyHandled: true` — its
-notes are already resolved, don't re-read them. Within a partial report, only work notes whose
-`priorStatus` isn't already `fixed`/`wont_fix`/`duplicate`.
+**What comes back is already filtered to the open work.** The receipts do the skipping, in the
+script, before it reaches you — a report whose notes are all resolved collapses to a stub (`report`,
+`noteCount`, `fullyHandled: true`, no text and no image paths), and a partly-done report arrives
+carrying only its still-open notes. So work everything you're given; there is nothing to screen out
+by hand, and no reason to narrate the finished reports back at the user beyond a one-line count.
+
+Emits JSON: top-level `reportCount`, `pendingReportCount`, `noteCount`, `pendingNoteCount`,
+`duplicateHints`, and `reports[]`. A live report has `pendingCount` and `notes[]` (`id`, `tags`,
+`text`, absolute `images[]`, plus `priorStatus` from any past receipt — `deferred`/`needs_info` are
+not terminal, so those notes come back). A `hasStableIds` flag marks legacy reports (those with no
+stable id to reflect status back). If `pendingReportCount` is 0, say "nothing new in the Slip folder"
+and stop — even when `reportCount` is high, that just means the backlog is fully resolved.
+
+Add `--all` to include the closed-out reports and notes in full. It costs real context, so reach for
+it only on demand: chasing what a past run decided, or checking whether a new note contradicts a
+resolved one. Never as the default opening move.
 
 If it can't tell which app folder to use, the script lists the available ones. Pick the obvious match
 and re-run with `--app-dir <path>` — or, to make it stick, add `.claude/slip.json`:
