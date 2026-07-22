@@ -151,21 +151,12 @@ def cmd_list(app_dir: Path, include_all: bool = False) -> None:
 
     annotate_with_receipts(reports, app_dir)
 
-    # Exact-duplicate hint: notes whose normalized text matches across the batch.
-    # A cheap signal for Claude's clustering — semantic dedupe stays Claude's job.
-    by_text: dict[str, list[str]] = {}
-    for rep in reports:
-        for note in rep["notes"]:
-            key = normalize(note["text"])
-            if key:
-                by_text.setdefault(key, []).append(note["id"] or f'{rep["report"]}#{note["index"]}')
-    dup_hints = [ids for ids in by_text.values() if len(ids) > 1]
-
     if include_all:
         visible = reports
     else:
         closed = resolved_index(reports, app_dir)
-        visible = [pending_view(with_repeat_hints(r, closed)) for r in reports]
+        visible = [pending_view(with_repeat_hints(r, closed))
+                   for r in reports if not r["fullyHandled"]]
 
     out = {
         "appDir": str(app_dir),
@@ -174,25 +165,35 @@ def cmd_list(app_dir: Path, include_all: bool = False) -> None:
         "pendingReportCount": sum(1 for r in reports if not r["fullyHandled"]),
         "noteCount": sum(len(r["notes"]) for r in reports),
         "pendingNoteCount": sum(r["pendingCount"] for r in reports),
-        "duplicateHints": dup_hints,
+        "duplicateHints": duplicate_hints(visible),
         "reports": visible,
     }
     print(json.dumps(out, indent=2, ensure_ascii=False))
 
 
 def pending_view(report: dict) -> dict:
-    """Drop work the receipts already closed out, so a re-run doesn't pay context
-    for it. A fully handled report collapses to a stub — enough to count and name,
-    with no note text or image paths; a partial one keeps only its open notes."""
-    if report["fullyHandled"]:
-        return {
-            "report": report["report"],
-            "noteCount": len(report["notes"]),
-            "pendingCount": 0,
-            "fullyHandled": True,
-        }
+    """Drop the notes the receipts already closed out, so a re-run doesn't pay
+    context for them. Fully handled reports don't reach here at all — they're
+    filtered out whole, and the counts alone carry that they existed."""
     open_notes = [n for n in report["notes"] if n["priorStatus"] not in TERMINAL_STATUSES]
     return {**report, "notes": open_notes, "noteCount": len(report["notes"])}
+
+
+def duplicate_hints(reports: list[dict]) -> list[list[str]]:
+    """Notes in the visible batch whose normalized text matches. A cheap signal for
+    Claude's clustering — semantic dedupe stays Claude's job. One note re-exported
+    into two files carries the same id twice and is not a duplicate of itself."""
+    by_text: dict[str, list[str]] = {}
+    for rep in reports:
+        for note in rep["notes"]:
+            key = normalize(note["text"])
+            if not key:
+                continue
+            ident = note["id"] or f'{rep["report"]}#{note["index"]}'
+            group = by_text.setdefault(key, [])
+            if ident not in group:
+                group.append(ident)
+    return [ids for ids in by_text.values() if len(ids) > 1]
 
 
 def resolved_index(reports: list[dict], app_dir: Path) -> list[dict]:

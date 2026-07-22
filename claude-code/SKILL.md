@@ -52,13 +52,15 @@ name to a subfolder of `~/Dropbox/Slip`. A `.claude/slip.json` is only needed wh
 differs from the app's export folder (it then names the `app`).
 
 **What comes back is already filtered to the open work.** The receipts do the skipping, in the
-script, before it reaches you — a report whose notes are all resolved collapses to a stub (`report`,
-`noteCount`, `fullyHandled: true`, no text and no image paths), and a partly-done report arrives
-carrying only its still-open notes. So work everything you're given; there is nothing to screen out
-by hand, and no reason to narrate the finished reports back at the user beyond a one-line count.
+script, before it reaches you — a report whose notes are all resolved is dropped from `reports[]`
+entirely, and a partly-done report arrives carrying only its still-open notes. So work everything
+you're given; there is nothing to screen out by hand. The finished backlog survives only as the
+difference between `reportCount` and `pendingReportCount`, which is all it's worth: don't narrate
+it back at the user beyond a one-line count.
 
 Emits JSON: top-level `reportCount`, `pendingReportCount`, `noteCount`, `pendingNoteCount`,
-`duplicateHints`, and `reports[]`. A live report has `pendingCount` and `notes[]` (`id`, `tags`,
+`duplicateHints` (over the open notes only), and `reports[]` — which holds only the reports with open
+work. A live report has `pendingCount` and `notes[]` (`id`, `tags`,
 `text`, absolute `images[]`, plus `priorStatus` from any past receipt — `deferred`/`needs_info` are
 not terminal, so those notes come back). A `hasStableIds` flag marks legacy reports (those with no
 stable id to reflect status back). If `pendingReportCount` is 0, say "nothing new in the Slip folder"
