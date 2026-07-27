@@ -295,6 +295,22 @@ is real (`git log -1 <sha> --stat`) and that what it verified is what the note a
 no verification line means the cluster isn't finished: read what it did, then either finish it here
 or send it back with the gap named. Never copy a subagent's summary into a receipt unchecked.
 
+**Narrate the queue — delegated work is invisible otherwise.** A subagent can't report mid-flight,
+so the run has to. Run them **in the foreground**, and around each one print one line before and
+one after:
+
+```
+▶ 3/7 export-whitespace — notes 4, 9 — delegating
+✓ 3/7 export-whitespace — abc1234 — verified: re-exported, trailing space gone
+```
+
+Then keep clusters small. A cluster that takes an agent twenty minutes reports once; four clusters
+of five report four times, and that difference *is* the visibility — there's no other dial. It also
+bounds what a bad brief can cost you. And write each receipt as its cluster lands rather than
+batching them at the end, so a run that dies leaves its progress on disk rather than in a context
+that's gone. Between the commits and the receipts, `git log --oneline` is the honest progress bar:
+it survives the chat, and it's the one record that can't be a claim.
+
 **Verify before calling anything done** — drive the fix through the repo's `verify`/`run` skill or
 build+tests. "Fixed" means observed working, not just edited. If you could only get as far as a
 clean build, say so plainly rather than implying it was exercised.
