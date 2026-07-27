@@ -128,6 +128,11 @@ They exist so a note can't be quietly re-deferred forever: each run that leaves 
 increments the count, closing it resets it to 0, and the resolver is expected to surface the age
 rather than let an item roll silently from round to round.
 
+A resolver should require a status to carry its own justification — `deferred` a summary saying who
+cut the work, `needs_info` its question, `duplicate` the `duplicateOf` it folds into. `fixed` needs
+nothing extra. This isn't a format rule (the phone reads whatever arrives); it's that the statuses
+which remove a note from the list are otherwise the cheapest ones to write, which is backwards.
+
 `status` semantics for the phone:
 - `fixed` → mark note Resolved, show `commit` + `summary`, move into the **Fixes** box.
 - `duplicate` → fold into `duplicateOf`'s outcome (don't double-count).

@@ -170,6 +170,7 @@ def cmd_list(app_dir: Path, triage_path: Path, include_all: bool = False,
             visible = select_notes(visible, lambda n: "triaged" not in n)
         if tags:
             visible = select_notes(visible, tag_matcher(tags))
+        visible = by_priority(visible)
         visible, truncated = apply_limit(visible, limit)
 
     out = {
@@ -210,6 +211,20 @@ def tag_matcher(tags: list[str]):
         have = {str(t).lower() for t in note.get("tags") or []}
         return bool(wanted & have) or ("untagged" in wanted and not have)
     return keep
+
+
+def by_priority(reports: list[dict]) -> list[dict]:
+    """Reports carrying a note some run already passed over, first; then oldest.
+
+    Both orderings guard against losing work, at different timescales: age says a
+    note is stuck and getting quietly re-skipped, and date matters because the phone
+    deletes whole day-folders on its retention window — an old note not worked is an
+    old note that eventually disappears unresolved. Ordering here rather than only
+    under `--limit` keeps a truncated pull a prefix of the full one.
+    """
+    return sorted(reports,  # default= for a report file that parsed to no notes at all
+                  key=lambda r: (-max((n.get("deferredRuns") or 0 for n in r["notes"]), default=0),
+                                 r["report"]))
 
 
 def apply_limit(reports: list[dict], limit: int | None) -> tuple[list[dict], bool]:
@@ -547,12 +562,21 @@ def triage_key(report_rel: str, note_id: str | None, index: int) -> str:
 
 def annotate_with_triage(reports: list[dict], triage: dict) -> None:
     """Hang each note's past triage record on it, so `list` can say 'already read,
-    here's the gist' instead of handing back a note to be worked out again."""
+    here's the gist' instead of handing back a note to be worked out again.
+
+    A gist is trusted in place of the note, which makes a wrong one stickier than no
+    gist at all — so the one case that can't be trusted is marked: a note that has a
+    screenshot summarized by a run that never opened it. `gistProvisional` is the
+    invalidation path; without it, a guess made once is believed forever.
+    """
     for rep in reports:
         for i, note in enumerate(rep["notes"]):
             record = triage.get(triage_key(rep["report"], note["id"], i))
             if record:
-                note["triaged"] = record
+                note["triaged"] = {
+                    **record,
+                    "gistProvisional": bool(note["images"]) and not record.get("sawScreenshot"),
+                }
 
 
 def cmd_triage(app_dir: Path, triage_path: Path, report: str, notes_path: str) -> None:
@@ -595,12 +619,9 @@ def cmd_receipt(app_dir: Path, report: str, results_path: str, agent: str) -> No
     if not isinstance(results, list):
         fail("results file must be a list, or an object with a 'results' list")
 
-    # A status outside the contract would read as non-terminal and leave the note
-    # pending forever — the exact way work goes missing. Refuse it loudly instead.
-    unknown = sorted({str(r.get("status")) for r in results
-                      if r.get("status") not in VALID_STATUSES})
-    if unknown:
-        fail(f"unknown status: {', '.join(unknown)} — use one of {', '.join(sorted(VALID_STATUSES))}")
+    problems = [p for i, r in enumerate(results) for p in result_problems(r, i)]
+    if problems:
+        fail("bad results file:\n  - " + "\n  - ".join(problems))
 
     # Aging is the script's to keep, not the caller's: a note left open again comes
     # back older, so nothing can be quietly re-deferred run after run.
@@ -631,6 +652,33 @@ def cmd_receipt(app_dir: Path, report: str, results_path: str, agent: str) -> No
     dest = results_dir / receipt_filename(report)
     dest.write_text(json.dumps(receipt, indent=2, ensure_ascii=False) + "\n")
     print(str(dest))
+
+
+def result_problems(r: dict, index: int) -> list[str]:
+    """Everything wrong with one result, so a bad file reports in full instead of
+    one error per re-run.
+
+    The rule behind the checks: the statuses that take a note off the list have to
+    cost something to write. `fixed` already pays — it means a verified change. The
+    cheap ones were the dangerous ones, because a status with no required field is
+    the path of least resistance for a run that has run out of room: `deferred` with
+    nothing said, or a terminal `duplicate` pointing nowhere, both close a note into
+    silence. Now each has to name what it is.
+    """
+    where = f"result {index}" + (f" ({r.get('noteId')})" if r.get("noteId") else "")
+    status = r.get("status")
+    if status not in VALID_STATUSES:
+        return [f"{where}: unknown status {status!r} — use one of {', '.join(sorted(VALID_STATUSES))}"]
+
+    required = {
+        "needs_info": ("question", "the question the user has to answer"),
+        "deferred": ("summary", "who cut it from this round and why — your own sense that it "
+                                "was too large is not a reason, it is a routing decision"),
+        "duplicate": ("duplicateOf", "the noteId this folds into"),
+    }.get(status)
+    if required and not str(r.get(required[0]) or "").strip():
+        return [f"{where}: status {status!r} needs a non-empty {required[0]} — {required[1]}"]
+    return []
 
 
 def merge_results(prior: dict, results: list, now: str) -> list[dict]:

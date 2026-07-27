@@ -150,6 +150,9 @@ and re-run with `--app-dir <path>` — or, to make it stick, add `.claude/slip.j
 - **A note carrying `triaged` you have already read** — start from its `gist` and leave the image
   alone. Reopen it only when you're about to build that cluster and need the detail, or when the
   gist is too thin to act on (and then rewrite the gist so the next run isn't stuck too).
+- **`gistProvisional: true` means that gist was written about a screenshot nobody opened** — it's a
+  guess, and it's the one kind you must not build on. Open the image, then re-triage it with
+  `sawScreenshot: true`. A guess made once is otherwise believed forever.
 - **Read every screenshot** of a note you haven't triaged, at its absolute path — you must see the
   UI. The screenshot is the context the user would otherwise have had to describe; a note with empty
   `text` is a **screenshot-only** prompt and the image is the whole of it.
@@ -338,8 +341,11 @@ from this round (§4) — never your own verdict on the size of the job; `needs_
 user, question in the `question` field. Put the substance in `summary` — for a non-code outcome that
 summary *is* the deliverable the phone shows back.
 
-Before you write a `deferred` or `needs_info`, name which of those two doors it went through and who
-opened it. If you can't, it isn't one — it's unfinished work, and it belongs back in §5.
+**The statuses that take a note off the list have to say what they are, and the script enforces it:**
+`deferred` needs a `summary` naming who cut it and why, `needs_info` needs its `question`, and
+`duplicate` needs the `duplicateOf` it folds into. `fixed` is the one that needs nothing extra —
+it already paid, in a verified change. If you can't fill the field, you don't have that outcome:
+it's unfinished work, and it belongs back in §5.
 
 Only include the notes **this run worked**: the script merges results over the report's last receipt,
 so untouched notes keep the outcome they already had. `deferredRuns`/`deferredSince` are the

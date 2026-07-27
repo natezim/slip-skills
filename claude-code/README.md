@@ -79,3 +79,13 @@ the rest from their gists.
 
 That memory is reading, not deciding: a triaged note is still open work, and only a receipt closes
 it. Delete the file and you lose some speed, nothing else.
+
+## Tests
+
+```sh
+python3 claude-code/test_slip.py
+```
+
+Stdlib `unittest`, no deps. Weighted toward the ways a note goes missing — a partial receipt
+reopening closed work, a status that parks a note forever, a gist trusted in place of a screenshot
+nobody read, a narrowed pull understating the backlog behind it.
