@@ -115,7 +115,8 @@ per-day report maps to a unique, date-led receipt (`2026-07-17/1731-weird-space.
     {
       "noteId": "2AB1F73C-EE11-4273-8653-F2C3C322C6BD",
       "status": "fixed",                      // fixed | deferred | needs_info | wont_fix | duplicate
-      "commit": "abc1234",                    // present when status == fixed (may be null pre-commit)
+      "commit": "abc1234",                    // BARE sha only, when status == fixed (null pre-commit).
+                                              // The phone shows it verbatim — no message, no prose.
       "filesTouched": ["DevThought/Slip/Export/BundleBuilder.swift"],
       "summary": "Whitespace is now trimmed on export.",
       "duplicateOf": null,                    // noteId, when status == duplicate
@@ -146,7 +147,9 @@ which remove a note from the list are otherwise the cheapest ones to write, whic
 
 `status` semantics for the phone:
 - `fixed` → mark note Resolved, show `commit` + `summary`, move into the **Fixes** box.
-- `duplicate` → fold into `duplicateOf`'s outcome (don't double-count).
+- `duplicate` → the note is closed; `duplicateOf` names the primary. Annotating the row as a
+  duplicate is enough — folding it into the primary's outcome is optional (the primary may even
+  live in a different report), and Slip doesn't do it.
 - `deferred` / `wont_fix` → annotate, keep visible (not resolved).
 - `needs_info` → surface `question` on the note as a prompt back to the user.
 

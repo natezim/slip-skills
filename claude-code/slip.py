@@ -221,10 +221,20 @@ def by_priority(reports: list[dict]) -> list[dict]:
     deletes whole day-folders on its retention window — an old note not worked is an
     old note that eventually disappears unresolved. Ordering here rather than only
     under `--limit` keeps a truncated pull a prefix of the full one.
+
+    "Oldest" means oldest *capture*, not oldest day-folder: folders are keyed to the
+    export, and a note can sit on the phone for days before being sent, so a new
+    folder can hold the oldest open thought in the whole batch.
     """
+    def earliest_capture(rep: dict) -> str:
+        stamps = [n["capturedAt"] for n in rep["notes"] if n.get("capturedAt")]
+        # Legacy notes carry no timestamp; fall back to the day-folder's date,
+        # pinned to midnight so it sorts with (and ahead of) that day's captures.
+        return min(stamps) if stamps else rep["report"][:10] + "T00:00:00Z"
+
     return sorted(reports,  # default= for a report file that parsed to no notes at all
                   key=lambda r: (-max((n.get("deferredRuns") or 0 for n in r["notes"]), default=0),
-                                 r["report"]))
+                                 earliest_capture(r), r["report"]))
 
 
 def apply_limit(reports: list[dict], limit: int | None) -> tuple[list[dict], bool]:
@@ -678,6 +688,13 @@ def result_problems(r: dict, index: int) -> list[str]:
     }.get(status)
     if required and not str(r.get(required[0]) or "").strip():
         return [f"{where}: status {status!r} needs a non-empty {required[0]} — {required[1]}"]
+
+    # The phone renders `commit` verbatim next to `summary`, so a sha with prose
+    # appended shows as duplicated caption text on every resolved row.
+    commit = r.get("commit")
+    if commit is not None and not re.fullmatch(r"[0-9a-f]{7,40}", str(commit).strip()):
+        return [f"{where}: commit must be a bare sha (got {str(commit)[:40]!r}) — "
+                "what the commit did belongs in summary"]
     return []
 
 

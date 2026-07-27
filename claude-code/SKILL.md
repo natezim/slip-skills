@@ -362,11 +362,15 @@ For each report you worked, write a results file (e.g. in your scratchpad) shape
 ```json
 { "project": "Slip", "results": [
   { "noteId": "<from list, or null for legacy>", "status": "fixed",
-    "commit": "abc1234 — the commit that fixed THIS note; null if uncommitted",
+    "commit": "abc1234",
     "filesTouched": ["path"],
     "summary": "one line", "duplicateOf": null, "question": null }
 ] }
 ```
+`commit` is the **bare sha** of the commit that fixed *this* note (null if uncommitted) — never a
+sha plus prose. The phone renders the value verbatim next to the summary, so anything appended to it
+shows up as duplicated caption text. The script rejects a non-sha. What the commit *did* belongs in
+`summary`.
 `status` ∈ `fixed | deferred | needs_info | wont_fix | duplicate` — a fixed wire contract the phone
 reads, so don't invent new ones. Read them as prompt outcomes, not just defect states: `fixed` = the
 prompt was acted on and is done (a code change, but equally an answer given or a decision reached);

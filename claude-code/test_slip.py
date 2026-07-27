@@ -182,6 +182,16 @@ class SlipTestCase(unittest.TestCase):
     def test_fixed_needs_nothing_extra(self):
         self.receipt([{"noteId": NOTE_A, "status": "fixed"}])  # non-code outcomes are legitimate
 
+    def test_commit_must_be_a_bare_sha(self):
+        # The phone renders the commit verbatim; "sha — prose" duplicated the
+        # summary on half of all real resolved rows before this was enforced.
+        self.assert_refused(
+            [{"noteId": NOTE_A, "status": "fixed",
+              "commit": "39d10c4 — fix: the tag box stops eating the note"}],
+            because="bare sha")
+        self.receipt([{"noteId": NOTE_A, "status": "fixed", "commit": "39d10c4"}])
+        self.receipt([{"noteId": NOTE_B, "status": "fixed", "commit": None}])  # pre-commit is fine
+
     # -- triage memory ---------------------------------------------------
     def test_triage_is_remembered_and_new_excludes_it(self):
         self.triage_notes([{"noteId": NOTE_A, "gist": "trailing space on export",
@@ -229,6 +239,17 @@ class SlipTestCase(unittest.TestCase):
         self.assertEqual([n["id"] for n in self.notes(tags=["BUG"])], [NOTE_A])  # case-insensitive
         self.add_report("2026-07-18/0900-plain.md", "# R\n\n## 1. 9:00 AM\nno tag here\n")
         self.assertEqual([n["text"] for n in self.notes(tags=["untagged"])], ["no tag here"])
+
+    def test_pull_order_follows_capture_date_not_export_folder(self):
+        # Day-folders are keyed to the *export*; a note can sit on the phone for
+        # days first, so a newer folder can hold the oldest open thought.
+        self.add_report("2026-07-20/0900-sent-late.md",
+                        "# R\n\n## 1. 9:00 AM\n"
+                        "<!-- id: 33330000-0000-0000-0000-000000000003 "
+                        "captured: 2026-07-10T08:00:00Z -->\ncaptured long ago\n")
+        # Fixture report's notes carry no captured: stamp, so it falls back to its
+        # folder date (2026-07-17) — later than the 07-10 capture above.
+        self.assertEqual(self.listing()["reports"][0]["report"], "2026-07-20/0900-sent-late.md")
 
     def test_aged_reports_are_pulled_ahead_of_merely_older_ones(self):
         self.add_report("2026-07-10/0900-older.md", "# R\n\n## 1. 9:00 AM\nolder note\n")
