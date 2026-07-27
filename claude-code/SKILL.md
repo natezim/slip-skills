@@ -327,6 +327,24 @@ it survives the chat, and it's the one record that can't be a claim.
 build+tests. "Fixed" means observed working, not just edited. If you could only get as far as a
 clean build, say so plainly rather than implying it was exercised.
 
+**Don't reach for a simulator or emulator to see the result.** On a mobile repo the tempting last
+step is to boot the thing and look. Don't: it's slow, it steals the user's screen, and it is
+precisely the round trip this loop exists to replace — *the user is already sending you
+screenshots*. A field report is a photograph of the real app on the real device, which is better
+evidence than anything a simulator would have shown you, and the next report is the QA result.
+Note that on iOS this rules out `xcodebuild test` too, not just launching the app: any destination
+that isn't `generic/platform=…` boots a simulator to run the suite.
+
+So verify what you can without one, and be exact about which you did:
+- **compile** — `xcodebuild build`/`build-for-testing` against a generic destination boots nothing;
+- **pure logic** — lift the value type into a scratch file and run it with `swiftc` on the host.
+  Layout maths, clamping, parsing and formatting are all testable this way in seconds;
+- **the files themselves** — read what the code wrote, rather than watching an app write it.
+
+Then hand off and say plainly that it wasn't exercised on a device. If a change genuinely can't be
+judged without seeing it — a visual you can't reason about — say so and ask, rather than booting one
+anyway. Run the on-device suite only when the user asks for it in so many words.
+
 **New ambiguity surfacing mid-fix?** Go back to §4 and ask — don't guess your way forward. If it
 surfaced inside a subagent, that agent stops and reports the question; you put it to the user and
 re-brief it. A subagent never settles a design question on the user's behalf.
