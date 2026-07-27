@@ -24,7 +24,8 @@ Slip/<Project>/
 ├── 2026-07-17/
 │   ├── 1731-weird-space.md        # one report per send; <HHmm>-<slug>.md
 │   └── images/
-│       └── 1731-001.png           # screenshots, HHmm-prefixed, co-located in the day
+│       ├── 1731-001.png           # screenshots, HHmm-prefixed, co-located in the day
+│       └── 1731-002.jpg           # …in whichever format encoded smaller; see below
 ├── 2026-07-18/
 │   └── 0904-action-section.md
 ├── _results/                      # receipts written by a resolver, read by the phone
@@ -86,6 +87,11 @@ Rules:
   as note text.
 - An empty note body (`_(no note)_`) means a **screenshot-only** capture; the image is the content.
 - `images` paths are relative to the report `.md`, so they resolve the same for a person or a tool.
+- **Never infer an image's extension — follow the link.** A day-folder may hold both `.png` and
+  `.jpg`: Slip encodes each capture whichever way comes out smaller, which is PNG for flat UI with
+  text and JPEG for photographs. Everything is `.png` in older sends. Match by the `HHmm-NNN` prefix
+  or by reading the markdown link; matching on `.png` silently drops half the screenshots, and
+  writing a copy under a hardcoded `.png` name mislabels the bytes inside it.
 
 **Back-compat:** older exports were a flat `<timestamp>-<slug>.md` plus a `<timestamp>-<slug>.json`
 sidecar (report `schema: 1`). Resolvers should still read that sidecar when a report has no embedded
