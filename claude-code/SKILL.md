@@ -5,9 +5,9 @@ description: >
   exported to a Dropbox/iCloud folder. Use when the user says "/slip", "check the Slip folder",
   "triage my field reports", "fix the bugs I sent from my phone", or similar. Reads the batch
   (screenshots included), dedupes, then plans the whole batch and asks any open questions as
-  multiple-choice before building. Works every bug to done before the first idea, hands large
-  clusters to their own subagent rather than shelving them, verifies, commits and pushes each fix as
-  its own revertable commit, then writes a resolution receipt. Only the user defers work out of a
+  multiple-choice before building. Works every bug to done before the first idea, hands a cluster it
+  can't yet scope to its own subagent rather than shelving it, verifies, commits and pushes each fix
+  as its own revertable commit, then writes a resolution receipt. Only the user defers work out of a
   round. Read-only against the reports except the receipt it writes — nothing is moved or deleted.
 ---
 
@@ -38,7 +38,7 @@ note alone. That's a timing safeguard, not a statement that the note isn't reall
 **Deferring is the user's call, not yours.** The failure this skill is tuned against: a run reads
 twelve notes, fixes three, and files the rest under "backlog" — where, in practice, they are lost.
 So nothing leaves this round on your own judgment. "Too big", "deserves its own session", "wants
-more thought" are not outcomes — a large note gets a subagent (§5), which is exactly what the
+more thought" are not outcomes — a note you can't yet scope gets a subagent (§5), which is exactly what the
 subagent is for. A note can end the run still open in only two ways:
 
 - the **user cut it** from this round in the §4 quiz → `deferred`;
@@ -276,11 +276,18 @@ re-reads what you already have loaded, re-derives what you already know, and han
 you then have to verify. That overhead is real and you pay it per agent — delegate reflexively and
 a batch of small fixes takes hours it didn't need to.
 
-So inline is the default. Hand a cluster to a `general-purpose` subagent via the Agent tool when
-working it here would genuinely threaten the run — a wide investigation across unfamiliar code, a
-sprawling diff, anything you'd expect to spend a long stretch inside. Those are the ones that
-otherwise end a twelve-note batch at note five. A fix you can see the shape of already is faster
-done here, and every cluster you keep is one you don't have to check afterwards.
+So inline is the default, and the test for leaving it is **can you already name the files?**
+
+- **You can** — work it here, however big it looks. A wide but mechanical change across files you
+  have open is cheap: you know where every edit goes, and a subagent would only re-derive that.
+- **You can't** — the cluster's first step is *finding out where this lives* — hand it to a
+  `general-purpose` subagent via the Agent tool. That search is the unbounded part, it's what ends a
+  twelve-note batch at note five, and it's the same reason reading fans out below.
+
+Size is the wrong dial, and reaching for it is how this rule drifts: a 400-line edit across known
+files costs little, while a three-file bug in a subsystem nobody has read costs the run. The
+searching is the expense, not the diff. Every cluster you keep is also one you don't have to check
+afterwards.
 
 The brief is the whole job, because the subagent starts cold and can't see the batch:
 - the note text (reconstructed per §2, never the garbled literal), its `noteId`, and the **absolute
@@ -301,6 +308,12 @@ kind — and nothing else. They touch no files, so they're safe in parallel, and
 hundred-screenshot problem actually goes away: the images are read once, in a context that is thrown
 away, and what survives is one line per note. Write their entries to the triage store before you
 plan, so the round is cheap to resume even if it ends early.
+
+**Where a project's own rules say not to spawn agents without being asked, invoking this skill is
+that ask — for the read-only triage fan-out only.** It writes nothing, it's the one place the payoff
+is unambiguous, and a hundred-note backlog is unworkable without it. A subagent that *writes* still
+needs the user's say-so in so many words: put it to them as a §4 question naming the cluster and why
+it can't be worked inline, and work it here if they'd rather.
 
 **A subagent's report is a claim, not a result.** Before its cluster counts as done, confirm the SHA
 is real (`git log -1 <sha> --stat`) and that what it verified is what the note asked for. No SHA or
