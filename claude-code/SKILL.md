@@ -404,6 +404,12 @@ rolling any single fix back is one lookup. For any report with `hasStableIds: fa
 with no embedded id and no sidecar), note that the phone can't reflect its status back — those notes
 have no stable IDs to match.
 
+**Finish with what to check, not just what changed.** The user QAs this batch themselves, so end
+with a short list in their terms — one line per fix, naming the screen or action to try and what
+should now happen. Order it the way they'd move through the app, not the order you committed in, and
+mark anything you couldn't exercise yourself so it gets looked at hardest. A list of SHAs is a
+record; this is the thing they actually work from.
+
 On a sliced batch (§1), close with the state of the queue: how many notes remain open, how many of
 those are now triaged and ready to work cheaply next time, and what the next run should pull first.
 That standing number is the thing the user is actually tracking — never let a round end reporting
