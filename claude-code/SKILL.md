@@ -107,6 +107,7 @@ commits anything — which is the same disappearing act as a backlog, just with 
 you already understood. Reach for it first on any re-run.
 
 ```
+python3 ~/.claude/skills/slip/slip.py list --tag now          # first, always — see §2
 python3 ~/.claude/skills/slip/slip.py list --new --tag bug --tag untagged --limit 25
 ```
 
@@ -159,8 +160,12 @@ and re-run with `--app-dir <path>` — or, to make it stick, add `.claude/slip.j
 - **Work out what they're asking for**, not just which bucket it falls in. A note can be a defect
   report, a feature ask, a question to answer, a direction to explore, or a half-formed thought that
   wants talking through before any code exists. Answer the prompt that was written.
-- Tags are freeform (Slip seeds only `bug`/`idea`). Untagged? Infer softly: wrong-behavior wording
+- Tags are freeform (Slip seeds `bug`/`idea`). Untagged? Infer softly: wrong-behavior wording
   → bug; wants ("I want", "add") → idea/feature.
+- **`now` is not a kind — it's the user's own priority call**, tapped on the phone at capture. It
+  outranks anything you would infer from wording, and it outranks the bug/idea split: a `now` idea
+  goes ahead of a bug nobody flagged. They were looking at the problem when they tapped it; you're
+  reading a transcript of it afterwards. Work every `now` note first, whatever else the batch holds.
 
 **Expect speech-to-text damage — most notes are dictated.** Slip's capture is voice-first, so what
 you're reading is a transcript, not considered prose. The words may be wrong even when the thought
@@ -208,9 +213,9 @@ same complaint genuinely rephrased. Never infer "no hint, so this is new."
 Never go straight from reading to editing. Turn the batch into a **plan**, put it in front of the
 user, and clear every open question *before* touching code.
 
-**Build the plan.** One line per cluster (§3), in the order §5 will actually work them: every defect
-before any idea; aged notes (`deferredRuns`) ahead of fresh ones inside each group; within defects,
-data-loss > crash > broken-interaction > cosmetic. For each cluster give: what the user is asking
+**Build the plan.** One line per cluster (§3), in the order §5 will actually work them: anything
+tagged `now` first (§2); then every defect before any idea; aged notes (`deferredRuns`) ahead of
+fresh ones inside each group; within defects, data-loss > crash > broken-interaction > cosmetic. For each cluster give: what the user is asking
 for, the note(s) behind it, the real code it touches (`file:line`, never a guess), your intended
 response in a sentence, and whether you'll do it inline or hand it to a subagent (§5). Flag anything
 you'd otherwise be guessing at.
@@ -254,8 +259,9 @@ settled: don't re-open it later in the run.
 ## 5. Execute — bugs first, then ideas
 Work the agreed plan in order, handling each cluster **once**.
 
-**Two passes, and don't interleave them.** Every defect cluster reaches verified-and-committed
-before the first idea starts. Ideas are where a batch runs long, so a run that gets cut short should
+**`now` first, then two passes, and don't interleave them.** Anything the user tagged `now` is
+worked before the rest of the batch, whatever kind it is. Then every defect cluster reaches
+verified-and-committed before the first idea starts. Ideas are where a batch runs long, so a run that gets cut short should
 cost the user ideas, never fixes. Inside each pass, aged notes (§1) go ahead of fresh ones.
 
 **Delegate the big clusters — one cluster, one subagent.** Anything needing more than a couple of

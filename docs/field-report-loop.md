@@ -123,10 +123,12 @@ every record it didn't touch this run — a run that receipts only the notes it 
 the ones an earlier run closed. Records join by `noteId`; a legacy report with no ids joins
 positionally and so has to be receipted in full.
 
-`deferredRuns` / `deferredSince` are **resolver-owned aging**, and optional — the phone ignores them.
-They exist so a note can't be quietly re-deferred forever: each run that leaves a note open
-increments the count, closing it resets it to 0, and the resolver is expected to surface the age
-rather than let an item roll silently from round to round.
+`deferredRuns` / `deferredSince` are **resolver-owned aging**, and optional — written by the resolver,
+and the phone may surface them (Slip shows "asked 3 times, still open • since Jul 12"). They exist so
+a note can't be quietly re-deferred forever: each run that leaves a note open increments the count,
+closing it resets it to 0, and both sides are expected to show the age rather than let an item roll
+silently from round to round. Being optional, a reader must tolerate their absence — older receipts
+predate them, and any tool may write a receipt without them.
 
 A resolver should require a status to carry its own justification — `deferred` a summary saying who
 cut the work, `needs_info` its question, `duplicate` the `duplicateOf` it folds into. `fixed` needs
