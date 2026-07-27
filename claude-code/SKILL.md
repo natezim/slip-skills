@@ -261,14 +261,26 @@ Work the agreed plan in order, handling each cluster **once**.
 
 **`now` first, then two passes, and don't interleave them.** Anything the user tagged `now` is
 worked before the rest of the batch, whatever kind it is. Then every defect cluster reaches
-verified-and-committed before the first idea starts. Ideas are where a batch runs long, so a run that gets cut short should
+verified-and-committed before the first idea starts.
+
+**Stop at each pass boundary and check in.** After the `now` notes, and again when the defects are
+done, come back with what landed, what's next, and one question: carry on, or change the order?
+Keep it to a few lines — this is a checkpoint, not a report. A batch of any size is otherwise hours
+of silence after a single planning quiz, and a plan agreed at minute two is at its least informed
+exactly when it's least revisable. It's also the cheapest moment to be redirected: everything behind
+you is committed and receipted, so nothing is lost by changing course here. Ideas are where a batch runs long, so a run that gets cut short should
 cost the user ideas, never fixes. Inside each pass, aged notes (§1) go ahead of fresh ones.
 
-**Delegate the big clusters — one cluster, one subagent.** Anything needing more than a couple of
-files read, or more than a small diff, goes to a `general-purpose` subagent via the Agent tool rather
-than being worked in this thread. That is what stops a twelve-note batch from running out of context
-at note five — which is the actual reason batches used to end up as a backlog. Small, obvious
-clusters stay inline; briefing an agent isn't worth it for a one-line fix.
+**Delegate only the clusters that would otherwise cost you the run.** A subagent starts cold: it
+re-reads what you already have loaded, re-derives what you already know, and hands back a summary
+you then have to verify. That overhead is real and you pay it per agent — delegate reflexively and
+a batch of small fixes takes hours it didn't need to.
+
+So inline is the default. Hand a cluster to a `general-purpose` subagent via the Agent tool when
+working it here would genuinely threaten the run — a wide investigation across unfamiliar code, a
+sprawling diff, anything you'd expect to spend a long stretch inside. Those are the ones that
+otherwise end a twelve-note batch at note five. A fix you can see the shape of already is faster
+done here, and every cluster you keep is one you don't have to check afterwards.
 
 The brief is the whole job, because the subagent starts cold and can't see the batch:
 - the note text (reconstructed per §2, never the garbled literal), its `noteId`, and the **absolute
