@@ -34,8 +34,11 @@ Slip/<Project>/
 
 - One report file per **send**, inside a `<yyyy-MM-dd>/` day-folder; images live in that day's
   `images/`, prefixed with the send's `HHmm` so several sends in a day never collide.
-- **Bounded & self-organizing:** ~1 folder/day. The app purges whole day-folders older than its
-  retention window — that's the only cleanup; nothing is ever moved or archived.
+- **Bounded, if the capture side is sweeping:** ~1 folder/day. The app purges whole day-folders past
+  its retention window — that's the only cleanup; nothing is ever moved or archived. Note that in
+  Slip this sweep is **opt-in for a custom export folder** (`cleanExportFolder`), because the folder
+  belongs to the user, not the app. With it off the loop still works and the folder grows without
+  limit, so a resolver must not assume the batch it's handed is bounded, recent, or complete.
 - `_results/` and `images/` are reserved names; discovery on both sides ignores them as reports.
 
 ## Report — `<day>/<HHmm>-<slug>.md` (written by Slip)
