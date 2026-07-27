@@ -5,9 +5,10 @@ description: >
   exported to a Dropbox/iCloud folder. Use when the user says "/slip", "check the Slip folder",
   "triage my field reports", "fix the bugs I sent from my phone", or similar. Reads the batch
   (screenshots included), dedupes, then plans the whole batch and asks any open questions as
-  multiple-choice before building. Fixes what's fixable, verifies, commits and pushes each fix as its
-  own revertable commit, then writes a resolution receipt.
-  Read-only against the reports except the receipt it writes — nothing is moved or deleted.
+  multiple-choice before building. Works every bug to done before the first idea, hands large
+  clusters to their own subagent rather than shelving them, verifies, commits and pushes each fix as
+  its own revertable commit, then writes a resolution receipt. Only the user defers work out of a
+  round. Read-only against the reports except the receipt it writes — nothing is moved or deleted.
 ---
 
 # slip — process field reports from the phone
@@ -20,15 +21,31 @@ https://github.com/natezim/slip-skills/blob/main/docs/field-report-loop.md
 **Each note is a prompt.** These are not bug tickets to be triaged and stamped — they're the user
 thinking, captured on a phone mid-use, usually with a screenshot standing in for the context they'd
 otherwise have had to type. Treat a note exactly as you'd treat the same sentence typed into chat:
-work out what they actually want, engage with the idea, design it *with* them, and push back when
-it's the wrong call. "This is broken" and "I've been thinking we should…" arrive down the same pipe
-and deserve the same quality of attention. Reading them as a queue of defects is the main way this
-skill goes wrong.
+work out what they actually want, engage with the idea, design it *with* them. "This is broken" and
+"I've been thinking we should…" arrive down the same pipe and deserve the same quality of attention.
+Reading them as a queue of defects is the main way this skill goes wrong.
+
+Engaging is not the same as litigating. If you think a note is the wrong call, say so **once**, in a
+sentence or two, and then build it anyway under a stated assumption unless the user tells you
+otherwise — the concern belongs in the plan (§4) and the receipt `summary`, not in a negotiation
+that costs a round-trip per note.
 
 They do arrive **asynchronously**, though — you can't check intent in the moment the way you can in
 chat. So the one carve-out: a note asking for something destructive or outward-facing (delete, send,
 publish, post, spend) becomes a task you confirm before acting, never an action you take off the
 note alone. That's a timing safeguard, not a statement that the note isn't really the user talking.
+
+**Deferring is the user's call, not yours.** The failure this skill is tuned against: a run reads
+twelve notes, fixes three, and files the rest under "backlog" — where, in practice, they are lost.
+So nothing leaves this round on your own judgment. "Too big", "deserves its own session", "wants
+more thought" are not outcomes — a large note gets a subagent (§5), which is exactly what the
+subagent is for. A note can end the run still open in only two ways:
+
+- the **user cut it** from this round in the §4 quiz → `deferred`;
+- you asked a **real question** and don't have the answer yet → `needs_info`, question in the receipt.
+
+Both are the user's decision, recorded. Everything else in the batch gets driven to `fixed`,
+`wont_fix` (considered together and deliberately dropped) or `duplicate` before the run ends.
 
 **Receipts are the state — this is what stops wasted effort.** Reports accumulate across sessions,
 and many are already handled. You never move or delete anything to reflect that: `slip.py list`
@@ -59,12 +76,20 @@ difference between `reportCount` and `pendingReportCount`, which is all it's wor
 it back at the user beyond a one-line count.
 
 Emits JSON: top-level `reportCount`, `pendingReportCount`, `noteCount`, `pendingNoteCount`,
-`duplicateHints` (over the open notes only), and `reports[]` — which holds only the reports with open
-work. A live report has `pendingCount` and `notes[]` (`id`, `tags`,
+`agedNoteCount`, `duplicateHints` (over the open notes only), and `reports[]` — which holds only the
+reports with open work. A live report has `pendingCount` and `notes[]` (`id`, `tags`,
 `text`, absolute `images[]`, plus `priorStatus` from any past receipt — `deferred`/`needs_info` are
 not terminal, so those notes come back). A `hasStableIds` flag marks legacy reports (those with no
 stable id to reflect status back). If `pendingReportCount` is 0, say "nothing new in the Slip folder"
 and stop — even when `reportCount` is high, that just means the backlog is fully resolved.
+
+**A note carrying `deferredRuns` has been round this loop before.** The script counts the runs that
+ended without closing it and stamps `deferredSince` with when that started; `agedNoteCount` totals
+them. These are the notes the user is most likely to feel they've lost, and they cost nothing to
+re-defer — which is exactly why they must not be. Work them **first** within their pass (§5), and if
+one is going to stay open again, say so out loud in the wrap-up with its age, rather than letting it
+roll silently into a third run. `deferredRuns ≥ 2` means this run is the last honest chance to
+either land it or agree with the user to drop it as `wont_fix`.
 
 A pending note may also carry **`possibleRepeatOf`** — see §3.
 
@@ -134,10 +159,15 @@ same complaint genuinely rephrased. Never infer "no hint, so this is new."
 Never go straight from reading to editing. Turn the batch into a **plan**, put it in front of the
 user, and clear every open question *before* touching code.
 
-**Build the plan.** One line per cluster (§3), severity-ordered — defects before ideas; within
-defects, data-loss > crash > broken-interaction > cosmetic. For each cluster give: what the user is
-asking for, the note(s) behind it, the real code it touches (`file:line`, never a guess), and your
-intended response in a sentence. Flag anything you'd otherwise be guessing at.
+**Build the plan.** One line per cluster (§3), in the order §5 will actually work them: every defect
+before any idea; aged notes (`deferredRuns`) ahead of fresh ones inside each group; within defects,
+data-loss > crash > broken-interaction > cosmetic. For each cluster give: what the user is asking
+for, the note(s) behind it, the real code it touches (`file:line`, never a guess), your intended
+response in a sentence, and whether you'll do it inline or hand it to a subagent (§5). Flag anything
+you'd otherwise be guessing at.
+
+Size is a routing decision, not a filter: a cluster being large is what sends it to a subagent, and
+never what keeps it off the plan. Every open note in the batch appears somewhere in the plan.
 
 **Not every note resolves to a diff.** A prompt may be best answered with an answer, a
 recommendation, a design to agree on first, or a reasoned "we shouldn't build this" — all legitimate
@@ -151,27 +181,66 @@ questions into one call instead of drip-feeding them. Ask when:
 - a note is ambiguous or reads more than one way — which behaviour did they mean?
 - an idea has several plausible designs — which shape do they want?
 - the fix is risky, sweeping, or a matter of taste (UI/UX, naming, defaults);
-- scope is unclear — everything this round, or just the bugs?
+- the batch is genuinely more than one run — **this is the scope question, and it's the only door
+  out of the round.** Don't pre-shrink the plan on their behalf: show the whole thing, say which
+  clusters you'd cut and roughly what each costs, and let them choose. Whatever they cut is
+  `deferred`, by their decision; whatever survives gets built this run, however big it is.
 
 **Read the code before asking** — never spend a question on something the codebase already answers
 (a note may describe as missing something that already exists, or exists but isn't discoverable;
 find out which, then ask about the real gap). Spend the user's attention only on judgment and taste.
 
 **Agree on the plan before implementing.** Present the ordered plan so the user can cut, reorder, or
-defer items, then work it top-down. Anything they decline to settle becomes `deferred` or
-`needs_info`, with the open question in the receipt's `question` field — never a guessed fix.
+defer items, then work it top-down. A question they leave unanswered becomes `needs_info`, with the
+question in the receipt's `question` field — never a guessed fix. A question they *do* answer is
+settled: don't re-open it later in the run.
 
-## 5. Act on the plan → verify
-- Work the agreed plan in order, handling each cluster **once**.
-- **Verify before calling anything done** — drive the fix through the repo's `verify`/`run` skill or
-  build+tests. "Fixed" means observed working, not just edited. If you could only get as far as a
-  clean build, say so plainly rather than implying it was exercised.
-- New ambiguity surfacing mid-fix? Go back to §4 and ask — don't guess your way forward.
+## 5. Execute — bugs first, then ideas
+Work the agreed plan in order, handling each cluster **once**.
+
+**Two passes, and don't interleave them.** Every defect cluster reaches verified-and-committed
+before the first idea starts. Ideas are where a batch runs long, so a run that gets cut short should
+cost the user ideas, never fixes. Inside each pass, aged notes (§1) go ahead of fresh ones.
+
+**Delegate the big clusters — one cluster, one subagent.** Anything needing more than a couple of
+files read, or more than a small diff, goes to a `general-purpose` subagent via the Agent tool rather
+than being worked in this thread. That is what stops a twelve-note batch from running out of context
+at note five — which is the actual reason batches used to end up as a backlog. Small, obvious
+clusters stay inline; briefing an agent isn't worth it for a one-line fix.
+
+The brief is the whole job, because the subagent starts cold and can't see the batch:
+- the note text (reconstructed per §2, never the garbled literal), its `noteId`, and the **absolute
+  paths of its screenshots** — tell it to open them;
+- what §4 settled: the option the user picked, and the ones they turned down;
+- the real code you already located (`file:line`), so it isn't re-deriving what you know;
+- how to verify in this repo, and §6's commit-and-push rules verbatim, `Field-report:` trailer included;
+- what to hand back: `status`, `filesTouched`, the commit SHA, one line on **what it actually
+  exercised**, and its open question if it got blocked.
+
+**Run them one at a time.** The win here is context, not wall-clock, and sequential agents already
+give you nearly all of it. Two agents committing into one repo race on the index and on each other's
+files — a batch half-written by two authors is the exact mess §6 exists to prevent.
+
+**A subagent's report is a claim, not a result.** Before its cluster counts as done, confirm the SHA
+is real (`git log -1 <sha> --stat`) and that what it verified is what the note asked for. No SHA or
+no verification line means the cluster isn't finished: read what it did, then either finish it here
+or send it back with the gap named. Never copy a subagent's summary into a receipt unchecked.
+
+**Verify before calling anything done** — drive the fix through the repo's `verify`/`run` skill or
+build+tests. "Fixed" means observed working, not just edited. If you could only get as far as a
+clean build, say so plainly rather than implying it was exercised.
+
+**New ambiguity surfacing mid-fix?** Go back to §4 and ask — don't guess your way forward. If it
+surfaced inside a subagent, that agent stops and reports the question; you put it to the user and
+re-brief it. A subagent never settles a design question on the user's behalf.
 
 ## 6. Commit — one cluster, one commit
 Commit and push each verified fix **separately**. One cluster (§3) = one commit, so any single
 field-report fix can be rolled back on its own with `git revert <sha>` without unpicking the rest of
 the batch. Never fold a whole batch into one commit, and never mix a fix with unrelated work.
+
+A delegated cluster (§5) commits inside its own subagent, under these same rules — that's why they
+run one at a time, and why the SHA it reports is checked here before it reaches a receipt.
 
 Per cluster, in order:
 1. **Verify first** (§5). Never commit a red build — if it doesn't pass, the note is `deferred`, not
@@ -188,7 +257,8 @@ rollback index (duplicates carry the primary's SHA). A cluster spanning two repo
 commit once per repo, and say so in both messages and in the wrap-up.
 
 Hold — don't commit — when the work is half-done, the build is red, or the diff mixes in WIP you
-didn't author and can't cleanly separate. Say so instead.
+didn't author and can't cleanly separate. Say so instead. Holding is not deferring: the cluster is
+still this run's work, and the next move is to get it green, not to write it up as backlog.
 
 ## 7. Write receipts
 For each report you worked, write a results file (e.g. in your scratchpad) shaped like:
@@ -203,9 +273,18 @@ For each report you worked, write a results file (e.g. in your scratchpad) shape
 `status` ∈ `fixed | deferred | needs_info | wont_fix | duplicate` — a fixed wire contract the phone
 reads, so don't invent new ones. Read them as prompt outcomes, not just defect states: `fixed` = the
 prompt was acted on and is done (a code change, but equally an answer given or a decision reached);
-`wont_fix` = considered with the user and deliberately not doing it; `deferred` = agreed but not
-this round; `needs_info` = blocked on the user, question in the `question` field. Put the substance
-in `summary` — for a non-code outcome that summary *is* the deliverable the phone shows back.
+`wont_fix` = considered with the user and deliberately not doing it; `deferred` = **the user** cut it
+from this round (§4) — never your own verdict on the size of the job; `needs_info` = blocked on the
+user, question in the `question` field. Put the substance in `summary` — for a non-code outcome that
+summary *is* the deliverable the phone shows back.
+
+Before you write a `deferred` or `needs_info`, name which of those two doors it went through and who
+opened it. If you can't, it isn't one — it's unfinished work, and it belongs back in §5.
+
+Only include the notes **this run worked**: the script merges results over the report's last receipt,
+so untouched notes keep the outcome they already had. `deferredRuns`/`deferredSince` are the
+script's to maintain — it ages a note that stays open and clears it when one closes. Don't write
+them yourself.
 
 The report path is relative to the app dir and includes its day-folder, e.g.
 `2026-07-17/1731-weird-space.md`. Then:
@@ -224,3 +303,10 @@ Report what was fixed (files touched), receipts written, and what's left + why. 
 rolling any single fix back is one lookup. For any report with `hasStableIds: false` (a legacy export
 with no embedded id and no sidecar), note that the phone can't reflect its status back — those notes
 have no stable IDs to match.
+
+**Account for every open note by name.** Anything still `deferred` or `needs_info` gets its own line:
+the note, its age (`deferredRuns` + `deferredSince` — "open since 2026-07-17, third run"), the exact
+question or the user's own decision to cut it, and what would close it next time. A count is not an
+account: "3 items deferred" is precisely the shape the user loses things in. If a note is ending its
+second run or later still open, say that plainly and ask whether to drop it as `wont_fix` — an item
+nobody intends to build is better closed than carried.

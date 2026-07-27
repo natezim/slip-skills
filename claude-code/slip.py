@@ -36,6 +36,7 @@ DEFAULT_DROP_ROOT = "~/Dropbox/Slip"  # where Slip exports; one subfolder per ap
 # Receipt statuses that close a note out for good. `deferred`/`needs_info` do not —
 # those stay pending until a later run resolves them.
 TERMINAL_STATUSES = {"fixed", "wont_fix", "duplicate"}
+VALID_STATUSES = TERMINAL_STATUSES | {"deferred", "needs_info"}
 # A pending note this similar to an already-closed one is probably the same
 # complaint arriving twice — which usually means the first fix didn't take.
 REPEAT_SIMILARITY = 0.75
@@ -165,6 +166,7 @@ def cmd_list(app_dir: Path, include_all: bool = False) -> None:
         "pendingReportCount": sum(1 for r in reports if not r["fullyHandled"]),
         "noteCount": sum(len(r["notes"]) for r in reports),
         "pendingNoteCount": sum(r["pendingCount"] for r in reports),
+        "agedNoteCount": aged_note_count(reports),
         "duplicateHints": duplicate_hints(visible),
         "reports": visible,
     }
@@ -177,6 +179,13 @@ def pending_view(report: dict) -> dict:
     filtered out whole, and the counts alone carry that they existed."""
     open_notes = [n for n in report["notes"] if n["priorStatus"] not in TERMINAL_STATUSES]
     return {**report, "notes": open_notes, "noteCount": len(report["notes"])}
+
+
+def aged_note_count(reports: list[dict]) -> int:
+    """Open notes a past run already left open at least once. Surfaced on its own
+    so a re-run can't miss that some of this batch is not, in fact, new."""
+    return sum(1 for rep in reports for note in rep["notes"]
+               if note["priorStatus"] not in TERMINAL_STATUSES and note.get("deferredRuns"))
 
 
 def duplicate_hints(reports: list[dict]) -> list[list[str]]:
@@ -410,22 +419,39 @@ def receipt_results(report_rel: str, app_dir: Path) -> dict:
         data = json.loads(receipt.read_text())
     except (json.JSONDecodeError, OSError):
         return {}
-    results = {}
-    for i, r in enumerate(data.get("results", [])):
-        key = r.get("noteId")
-        results[key if key is not None else i] = r
-    return results
+    return {result_key(r, i): r for i, r in enumerate(data.get("results", []))}
+
+
+def result_key(record: dict, index: int) -> str | int:
+    """How a result joins back to its note: the stable id, or — for a legacy report
+    that never had one — its position. Positional joins only line up when the whole
+    report is receipted at once; id-joined results merge a note at a time."""
+    key = record.get("noteId")
+    return key if key is not None else index
+
+
+def prior_aging(record: dict) -> tuple[int, str | None]:
+    """The `(runs, since)` a past receipt recorded for a note, defensively parsed —
+    any tool that speaks the format may have written it, including by hand."""
+    runs, since = record.get("deferredRuns"), record.get("deferredSince")
+    return (runs if isinstance(runs, int) and runs > 0 else 0,
+            since if isinstance(since, str) and since else None)
 
 
 def annotate_with_receipts(reports: list[dict], app_dir: Path) -> None:
-    """Tag each note with its last receipt `priorStatus`, and mark reports already
-    fully handled — so a re-run skips finished work instead of re-analyzing it."""
+    """Tag each note with its last receipt `priorStatus` and how long it has been
+    left open, and mark reports already fully handled — so a re-run skips finished
+    work instead of re-analyzing it."""
     for rep in reports:
         results = receipt_results(rep["report"], app_dir)
         handled = 0
         for i, note in enumerate(rep["notes"]):
             key = note["id"] if note["id"] is not None else i
-            note["priorStatus"] = (results.get(key) or {}).get("status")
+            record = results.get(key) or {}
+            note["priorStatus"] = record.get("status")
+            runs, since = prior_aging(record)
+            if runs:  # only on the notes that have one — a `0` on every note is dead context
+                note["deferredRuns"], note["deferredSince"] = runs, since
             if note["priorStatus"] in TERMINAL_STATUSES:
                 handled += 1
         rep["pendingCount"] = len(rep["notes"]) - handled
@@ -440,6 +466,18 @@ def cmd_receipt(app_dir: Path, report: str, results_path: str, agent: str) -> No
     results = results_data.get("results", results_data)  # accept bare list too
     if not isinstance(results, list):
         fail("results file must be a list, or an object with a 'results' list")
+
+    # A status outside the contract would read as non-terminal and leave the note
+    # pending forever — the exact way work goes missing. Refuse it loudly instead.
+    unknown = sorted({str(r.get("status")) for r in results
+                      if r.get("status") not in VALID_STATUSES})
+    if unknown:
+        fail(f"unknown status: {', '.join(unknown)} — use one of {', '.join(sorted(VALID_STATUSES))}")
+
+    # Aging is the script's to keep, not the caller's: a note left open again comes
+    # back older, so nothing can be quietly re-deferred run after run.
+    prior = receipt_results(report, app_dir)
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     project = results_data.get("project") if isinstance(results_data, dict) else None
     if not project:
@@ -456,9 +494,9 @@ def cmd_receipt(app_dir: Path, report: str, results_path: str, agent: str) -> No
         "app": APP_NAME,
         "project": project,
         "sourceReport": report,
-        "processedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "processedAt": now,
         "agent": agent,
-        "results": [clean_result(r) for r in results],
+        "results": merge_results(prior, results, now),
     }
     results_dir = app_dir / "_results"
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -467,7 +505,27 @@ def cmd_receipt(app_dir: Path, report: str, results_path: str, agent: str) -> No
     print(str(dest))
 
 
-def clean_result(r: dict) -> dict:
+def merge_results(prior: dict, results: list, now: str) -> list[dict]:
+    """This run's outcomes laid over the report's last receipt, not swapped for it.
+
+    A run only receipts the notes it worked, and the notes it didn't are usually
+    the ones an earlier run already closed — overwriting would reopen them and
+    hand the whole report back as unfinished. Untouched records pass through
+    verbatim, in place; genuinely new ones append.
+    """
+    incoming = {}
+    for i, r in enumerate(results):
+        key = result_key(r, i)
+        incoming[key] = clean_result(r, prior.get(key) or {}, now)
+    return list({**prior, **incoming}.values())
+
+
+def clean_result(r: dict, prior: dict, now: str) -> dict:
+    """One result in wire shape, with the note's age carried forward from its last
+    receipt: `deferredRuns` counts the runs that ended without closing it, and
+    `deferredSince` is when that started. Closing the note resets both."""
+    still_open = r.get("status") not in TERMINAL_STATUSES
+    runs, since = prior_aging(prior)
     return {
         "noteId": r.get("noteId"),
         "status": r.get("status"),
@@ -476,6 +534,8 @@ def clean_result(r: dict) -> dict:
         "summary": r.get("summary", ""),
         "duplicateOf": r.get("duplicateOf"),
         "question": r.get("question"),
+        "deferredRuns": runs + 1 if still_open else 0,
+        "deferredSince": (since or now) if still_open else None,
     }
 
 

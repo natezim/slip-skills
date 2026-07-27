@@ -110,11 +110,23 @@ per-day report maps to a unique, date-led receipt (`2026-07-17/1731-weird-space.
       "filesTouched": ["DevThought/Slip/Export/BundleBuilder.swift"],
       "summary": "Whitespace is now trimmed on export.",
       "duplicateOf": null,                    // noteId, when status == duplicate
-      "question": null                        // string, when status == needs_info
+      "question": null,                       // string, when status == needs_info
+      "deferredRuns": 0,                      // runs that ended without closing this note
+      "deferredSince": null                   // ISO-8601, when it first stayed open
     }
   ]
 }
 ```
+
+**A receipt is merged, not replaced.** A resolver rewrites the file each time, but carries forward
+every record it didn't touch this run — a run that receipts only the notes it worked must not reopen
+the ones an earlier run closed. Records join by `noteId`; a legacy report with no ids joins
+positionally and so has to be receipted in full.
+
+`deferredRuns` / `deferredSince` are **resolver-owned aging**, and optional — the phone ignores them.
+They exist so a note can't be quietly re-deferred forever: each run that leaves a note open
+increments the count, closing it resets it to 0, and the resolver is expected to surface the age
+rather than let an item roll silently from round to round.
 
 `status` semantics for the phone:
 - `fixed` → mark note Resolved, show `commit` + `summary`, move into the **Fixes** box.
@@ -138,7 +150,8 @@ clears its resolved status and pulls it back out of the Fixes box.
 counts-only stub, a partly-done one drops its closed notes — so a re-run skips finished work without
 moving anything, and without spending the resolver's context on it. `--all` opts back in to the
 whole history. `fixed`/`wont_fix`/`duplicate` close a note out; `deferred`/`needs_info` leave it
-pending for a later run.
+pending for a later run, and come back carrying `deferredRuns`/`deferredSince` plus a top-level
+`agedNoteCount`, so a re-run can tell a genuinely new note from one it has already passed over.
 
 Because a closed note's text is no longer shown, `list` carries one signal back across that edge: a
 pending note that closely echoes a closed one gets `possibleRepeatOf`, naming the earlier note and
