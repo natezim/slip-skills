@@ -153,6 +153,12 @@ whole history. `fixed`/`wont_fix`/`duplicate` close a note out; `deferred`/`need
 pending for a later run, and come back carrying `deferredRuns`/`deferredSince` plus a top-level
 `agedNoteCount`, so a re-run can tell a genuinely new note from one it has already passed over.
 
+A resolver may also keep **triage memory** — a private record of which notes it has already read and
+what it understood them to mean, so a large backlog isn't re-read (and its screenshots re-opened)
+every run. That state is deliberately *outside* this contract: the reference implementation keeps it
+in the repo it fixes, not in the shared folder, because it's the resolver's working memory and means
+nothing to the phone. Nothing here should ever require it.
+
 Because a closed note's text is no longer shown, `list` carries one signal back across that edge: a
 pending note that closely echoes a closed one gets `possibleRepeatOf`, naming the earlier note and
 the outcome its receipt recorded. It is a lexical match — a re-report in near-identical words fires

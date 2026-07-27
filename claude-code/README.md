@@ -59,10 +59,23 @@ It will:
 
 ## The helper (`slip.py`)
 
-Stdlib-only, two commands:
+Stdlib-only, three commands:
 
-- `list --app-dir DIR [--all]` → structured JSON of the pending reports; `--all` adds the ones the
-  receipts already closed out.
-- `receipt --app-dir DIR --report R --results F` → writes `_results/<flattened-R>.result.json`.
+- `list [--all] [--new] [--tag T] [--limit N]` → structured JSON of the pending reports. `--all`
+  adds the ones the receipts already closed out; `--new`, `--tag` and `--limit` narrow a big backlog
+  to a working set without ever understating how much is really open.
+- `triage --report R --notes F` → records what this run read, in `.claude/slip-triage.json`.
+- `receipt --report R --results F` → writes `_results/<flattened-R>.result.json`.
 
 `--app-dir` overrides both auto-detect and `slip.json`.
+
+## Big backlogs
+
+A hundred open notes is a hundred screenshots, and re-reading them every run is what kills the
+context before anything gets committed. So the skill remembers what it has read: a one-line gist per
+note in `.claude/slip-triage.json` (repo-local — it never goes near your synced folder, and Slip
+doesn't know it exists). A later run pulls `--new` for the notes nobody has looked at yet and works
+the rest from their gists.
+
+That memory is reading, not deciding: a triaged note is still open work, and only a receipt closes
+it. Delete the file and you lose some speed, nothing else.

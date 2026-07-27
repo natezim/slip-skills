@@ -97,6 +97,49 @@ Add `--all` to include the closed-out reports and notes in full. It costs real c
 it only on demand: chasing what a past run decided, or checking whether a new note contradicts a
 resolved one. Never as the default opening move.
 
+### A big batch is pulled in slices — and read only once, ever
+The counts arrive before any note does, so you always know the size before you spend anything on it.
+Past ~25 open notes, **do not pull the batch whole and do not read it end to end.** A hundred notes
+means a hundred screenshots and a hundred re-derivations, and the run dies of context long before it
+commits anything — which is the same disappearing act as a backlog, just with more work burned.
+
+**`--new` is the one that matters: notes no run has ever triaged.** Everything else re-reads what
+you already understood. Reach for it first on any re-run.
+
+```
+python3 ~/.claude/skills/slip/slip.py list --new --tag bug --tag untagged --limit 25
+```
+
+- `--new` — drop the notes a past run already read and summarized.
+- `--tag <t>` (repeatable) — `--tag bug --tag untagged` is the defect pass; `untagged` is not
+  optional there, since Slip only seeds `bug`/`idea` and a dictated note often carries neither.
+- `--limit N` — the first N open notes, oldest first; sets `truncated` when it holds some back.
+
+The counts stay global whatever you narrow to: `pendingNoteCount` is the whole backlog,
+`returnedNoteCount` is what this pull gave you. Say the real number out loud — "103 open, working
+the 25 oldest defects this round" — and never let a narrowed pull get reported as the whole batch.
+
+**Then record what you read, or you'll read it again.** For every note you understood, write a
+triage entry — this is the memory that makes a hundred-note backlog survivable:
+
+```json
+{ "notes": [ { "noteId": "<from list>", "gist": "one line, in your reconstructed words (§2)",
+               "cluster": "short-slug", "kind": "bug|idea|question", "sawScreenshot": true } ] }
+```
+```
+python3 ~/.claude/skills/slip/slip.py triage --report "<day>/<report>.md" --notes "<file.json>"
+```
+
+It lands in `.claude/slip-triage.json` — repo-local, never in the synced folder; the phone has no
+idea it exists. Next run those notes come back carrying `triaged`, and **that gist is what you work
+from: don't reopen the screenshot or re-derive the meaning unless you're about to build that
+cluster.** So the gist has to carry the note's actual content, not a filing label — "wants the list
+collapsed by default" is memory; "UI feedback" is not, and costs the next run the whole re-read.
+
+**Triage is memory, not an outcome.** A triaged note is still open work: it goes in the plan and it
+needs a receipt like anything else. Only receipts close notes, and only §4's scope quiz takes work
+out of a round. Recording that you read something is never how it leaves the list.
+
 If it can't tell which app folder to use, the script lists the available ones. Pick the obvious match
 and re-run with `--app-dir <path>` — or, to make it stick, add `.claude/slip.json`:
 ```json
@@ -104,9 +147,12 @@ and re-run with `--app-dir <path>` — or, to make it stick, add `.claude/slip.j
 ```
 
 ## 2. Understand — read each note as a prompt
-- **Read every screenshot** at its absolute path — you must see the UI. The screenshot is the
-  context the user would otherwise have had to describe; a note with empty `text` is a
-  **screenshot-only** prompt and the image is the whole of it.
+- **A note carrying `triaged` you have already read** — start from its `gist` and leave the image
+  alone. Reopen it only when you're about to build that cluster and need the detail, or when the
+  gist is too thin to act on (and then rewrite the gist so the next run isn't stuck too).
+- **Read every screenshot** of a note you haven't triaged, at its absolute path — you must see the
+  UI. The screenshot is the context the user would otherwise have had to describe; a note with empty
+  `text` is a **screenshot-only** prompt and the image is the whole of it.
 - **Work out what they're asking for**, not just which bucket it falls in. A note can be a defect
   report, a feature ask, a question to answer, a direction to explore, or a half-formed thought that
   wants talking through before any code exists. Answer the prompt that was written.
@@ -167,7 +213,8 @@ response in a sentence, and whether you'll do it inline or hand it to a subagent
 you'd otherwise be guessing at.
 
 Size is a routing decision, not a filter: a cluster being large is what sends it to a subagent, and
-never what keeps it off the plan. Every open note in the batch appears somewhere in the plan.
+never what keeps it off the plan. Every note **in this pull** appears somewhere in the plan — and on
+a sliced batch (§1), say in a line what's behind it: "25 shown, 103 open, 78 not yet read."
 
 **Not every note resolves to a diff.** A prompt may be best answered with an answer, a
 recommendation, a design to agree on first, or a reasoned "we shouldn't build this" — all legitimate
@@ -182,9 +229,15 @@ questions into one call instead of drip-feeding them. Ask when:
 - an idea has several plausible designs — which shape do they want?
 - the fix is risky, sweeping, or a matter of taste (UI/UX, naming, defaults);
 - the batch is genuinely more than one run — **this is the scope question, and it's the only door
-  out of the round.** Don't pre-shrink the plan on their behalf: show the whole thing, say which
-  clusters you'd cut and roughly what each costs, and let them choose. Whatever they cut is
-  `deferred`, by their decision; whatever survives gets built this run, however big it is.
+  out of the round.** Don't pre-shrink it on their behalf: give them the real shape (how many open,
+  how many defects, how many already aged), say which clusters you'd take first and roughly what
+  each costs, and let them choose. Whatever survives gets built this run, however big it is.
+
+  At a hundred notes, say plainly that it's several runs' work — that's a fact about the batch, not
+  a verdict on any note in it. **A note you didn't reach is not `deferred`.** `deferred` is written
+  only for something the user looked at and cut; a note this round never got to gets *no receipt at
+  all*, keeps its place in the queue, and picks up no age. Blanket-deferring the tail would age the
+  entire backlog in one go and destroy the one signal that says which notes are genuinely stuck.
 
 **Read the code before asking** — never spend a question on something the codebase already answers
 (a note may describe as missing something that already exists, or exists but isn't discoverable;
@@ -220,6 +273,13 @@ The brief is the whole job, because the subagent starts cold and can't see the b
 **Run them one at a time.** The win here is context, not wall-clock, and sequential agents already
 give you nearly all of it. Two agents committing into one repo race on the index and on each other's
 files — a batch half-written by two authors is the exact mess §6 exists to prevent.
+
+That rule is about *writing*. **Reading can fan out**: on a big batch, hand each report to its own
+read-only subagent to open the screenshots and come back with §1's triage entries — gist, cluster,
+kind — and nothing else. They touch no files, so they're safe in parallel, and they're where the
+hundred-screenshot problem actually goes away: the images are read once, in a context that is thrown
+away, and what survives is one line per note. Write their entries to the triage store before you
+plan, so the round is cheap to resume even if it ends early.
 
 **A subagent's report is a claim, not a result.** Before its cluster counts as done, confirm the SHA
 is real (`git log -1 <sha> --stat`) and that what it verified is what the note asked for. No SHA or
@@ -303,6 +363,11 @@ Report what was fixed (files touched), receipts written, and what's left + why. 
 rolling any single fix back is one lookup. For any report with `hasStableIds: false` (a legacy export
 with no embedded id and no sidecar), note that the phone can't reflect its status back — those notes
 have no stable IDs to match.
+
+On a sliced batch (§1), close with the state of the queue: how many notes remain open, how many of
+those are now triaged and ready to work cheaply next time, and what the next run should pull first.
+That standing number is the thing the user is actually tracking — never let a round end reporting
+only the slice it happened to take.
 
 **Account for every open note by name.** Anything still `deferred` or `needs_info` gets its own line:
 the note, its age (`deferredRuns` + `deferredSince` — "open since 2026-07-17, third run"), the exact

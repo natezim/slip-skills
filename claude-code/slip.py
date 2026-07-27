@@ -37,6 +37,11 @@ DEFAULT_DROP_ROOT = "~/Dropbox/Slip"  # where Slip exports; one subfolder per ap
 # those stay pending until a later run resolves them.
 TERMINAL_STATUSES = {"fixed", "wont_fix", "duplicate"}
 VALID_STATUSES = TERMINAL_STATUSES | {"deferred", "needs_info"}
+# Receipts record what was *resolved*. Triage records what was *read* — the far
+# bigger cost on a large batch, since re-reading means re-opening every screenshot
+# and re-deriving every cluster. Kept beside slip.json in the repo, never in the
+# synced export folder: this is the resolver's own memory, not part of the loop.
+TRIAGE_FILENAME = "slip-triage.json"
 # A pending note this similar to an already-closed one is probably the same
 # complaint arriving twice — which usually means the first fix didn't take.
 REPEAT_SIMILARITY = 0.75
@@ -140,7 +145,9 @@ def is_noise(name: str) -> bool:
 # list
 # ---------------------------------------------------------------------------
 
-def cmd_list(app_dir: Path, include_all: bool = False) -> None:
+def cmd_list(app_dir: Path, triage_path: Path, include_all: bool = False,
+             tags: list[str] | None = None, limit: int | None = None,
+             new_only: bool = False) -> None:
     if not app_dir.exists():
         fail(f"app folder not found: {app_dir}")
 
@@ -151,13 +158,19 @@ def cmd_list(app_dir: Path, include_all: bool = False) -> None:
         reports.append(load_report(md, app_dir))
 
     annotate_with_receipts(reports, app_dir)
+    annotate_with_triage(reports, load_triage(triage_path))
 
     if include_all:
-        visible = reports
+        visible, truncated = reports, False
     else:
         closed = resolved_index(reports, app_dir)
         visible = [pending_view(with_repeat_hints(r, closed))
                    for r in reports if not r["fullyHandled"]]
+        if new_only:
+            visible = select_notes(visible, lambda n: "triaged" not in n)
+        if tags:
+            visible = select_notes(visible, tag_matcher(tags))
+        visible, truncated = apply_limit(visible, limit)
 
     out = {
         "appDir": str(app_dir),
@@ -165,12 +178,57 @@ def cmd_list(app_dir: Path, include_all: bool = False) -> None:
         "reportCount": len(reports),
         "pendingReportCount": sum(1 for r in reports if not r["fullyHandled"]),
         "noteCount": sum(len(r["notes"]) for r in reports),
+        # The counts stay global on purpose: a narrowed pull must never make the
+        # backlog behind it look smaller than it is.
         "pendingNoteCount": sum(r["pendingCount"] for r in reports),
         "agedNoteCount": aged_note_count(reports),
+        "triagedNoteCount": triaged_note_count(reports),
+        "returnedNoteCount": sum(len(r["notes"]) for r in visible),
+        "truncated": truncated,
         "duplicateHints": duplicate_hints(visible),
         "reports": visible,
     }
     print(json.dumps(out, indent=2, ensure_ascii=False))
+
+
+def select_notes(reports: list[dict], keep) -> list[dict]:
+    """Reports narrowed to the notes matching `keep`, dropping any left with none."""
+    out = []
+    for rep in reports:
+        notes = [n for n in rep["notes"] if keep(n)]
+        if notes:
+            out.append({**rep, "notes": notes})
+    return out
+
+
+def tag_matcher(tags: list[str]):
+    """Case-insensitive tag test. `untagged` selects the notes carrying no tag at
+    all — Slip only seeds `bug`/`idea`, so without it a tag-narrowed pass would
+    silently skip everything dictated without one."""
+    wanted = {t.strip().lower() for t in tags if t.strip()}
+    def keep(note: dict) -> bool:
+        have = {str(t).lower() for t in note.get("tags") or []}
+        return bool(wanted & have) or ("untagged" in wanted and not have)
+    return keep
+
+
+def apply_limit(reports: list[dict], limit: int | None) -> tuple[list[dict], bool]:
+    """The first `limit` open notes, oldest report first — a working set small
+    enough to hold at once. What's left over is simply not returned: those notes
+    are still pending and still untriaged, and a note nobody looked at gets no
+    receipt and no age. Truncating is not deferring."""
+    if not limit or limit <= 0:
+        return reports, False
+    if sum(len(r["notes"]) for r in reports) <= limit:
+        return reports, False
+    out, taken = [], 0
+    for rep in reports:
+        if taken >= limit:
+            break
+        notes = rep["notes"][:limit - taken]
+        taken += len(notes)
+        out.append({**rep, "notes": notes})
+    return out, True
 
 
 def pending_view(report: dict) -> dict:
@@ -186,6 +244,13 @@ def aged_note_count(reports: list[dict]) -> int:
     so a re-run can't miss that some of this batch is not, in fact, new."""
     return sum(1 for rep in reports for note in rep["notes"]
                if note["priorStatus"] not in TERMINAL_STATUSES and note.get("deferredRuns"))
+
+
+def triaged_note_count(reports: list[dict]) -> int:
+    """Open notes a past run already read and summarized — the ones a re-run can
+    take from their gist instead of reopening their screenshots."""
+    return sum(1 for rep in reports for note in rep["notes"]
+               if note["priorStatus"] not in TERMINAL_STATUSES and note.get("triaged"))
 
 
 def duplicate_hints(reports: list[dict]) -> list[list[str]]:
@@ -458,6 +523,69 @@ def annotate_with_receipts(reports: list[dict], app_dir: Path) -> None:
         rep["fullyHandled"] = len(rep["notes"]) > 0 and handled == len(rep["notes"])
 
 
+# ---------------------------------------------------------------------------
+# Triage memory (repo-local; never written into the synced export folder)
+# ---------------------------------------------------------------------------
+
+def load_triage(path: Path) -> dict:
+    """What past runs recorded about notes they read, keyed `<report>#<id|index>`.
+    Missing or unreadable is not an error — it just means nothing has been read
+    yet, and the batch gets triaged from scratch."""
+    if not path.exists():
+        return {}
+    try:
+        notes = json.loads(path.read_text()).get("notes")
+    except (json.JSONDecodeError, OSError, AttributeError):
+        return {}
+    return notes if isinstance(notes, dict) else {}
+
+
+def triage_key(report_rel: str, note_id: str | None, index: int) -> str:
+    """Scoped by report so legacy notes, which have only a position, stay distinct."""
+    return f"{report_rel}#{note_id if note_id is not None else index}"
+
+
+def annotate_with_triage(reports: list[dict], triage: dict) -> None:
+    """Hang each note's past triage record on it, so `list` can say 'already read,
+    here's the gist' instead of handing back a note to be worked out again."""
+    for rep in reports:
+        for i, note in enumerate(rep["notes"]):
+            record = triage.get(triage_key(rep["report"], note["id"], i))
+            if record:
+                note["triaged"] = record
+
+
+def cmd_triage(app_dir: Path, triage_path: Path, report: str, notes_path: str) -> None:
+    md = (app_dir / report).resolve()
+    if not md.exists():
+        fail(f"report not found: {report}")
+    data = json.loads(Path(notes_path).read_text())
+    entries = data.get("notes", data) if isinstance(data, dict) else data
+    if not isinstance(entries, list):
+        fail("triage file must be a list, or an object with a 'notes' list")
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    records = dict(load_triage(triage_path))
+    for i, e in enumerate(entries):
+        gist = str(e.get("gist") or "").strip()
+        if not gist:
+            fail(f"triage entry {i} has no gist — a note recorded as read with "
+                 "nothing recorded about it is worse than one left unread")
+        records[triage_key(report, e.get("noteId"), i)] = {
+            "gist": gist,
+            "cluster": e.get("cluster"),
+            "kind": e.get("kind"),
+            "sawScreenshot": bool(e.get("sawScreenshot")),
+            "triagedAt": now,
+        }
+
+    triage_path.parent.mkdir(parents=True, exist_ok=True)
+    triage_path.write_text(
+        json.dumps({"schema": SCHEMA_VERSION, "app": APP_NAME, "notes": records},
+                   indent=2, ensure_ascii=False) + "\n")
+    print(str(triage_path))
+
+
 def cmd_receipt(app_dir: Path, report: str, results_path: str, agent: str) -> None:
     md = (app_dir / report).resolve()
     if not md.exists():
@@ -552,6 +680,16 @@ def main() -> None:
     pl = sub.add_parser("list", help="Emit pending reports as JSON")
     pl.add_argument("--all", action="store_true",
                     help="Include reports and notes the receipts already closed out")
+    pl.add_argument("--new", action="store_true",
+                    help="Only notes no past run has triaged")
+    pl.add_argument("--tag", action="append", metavar="TAG",
+                    help="Only notes with this tag; repeatable. `untagged` selects those with none")
+    pl.add_argument("--limit", type=int, metavar="N",
+                    help="Cap the notes returned, oldest report first")
+
+    pt = sub.add_parser("triage", help="Record what a run read, so a re-run needn't re-read it")
+    pt.add_argument("--report", required=True, help="Report path relative to app dir")
+    pt.add_argument("--notes", required=True, help="JSON file with the triaged notes")
 
     pr = sub.add_parser("receipt", help="Write a resolution receipt")
     pr.add_argument("--report", required=True, help="Report path relative to app dir")
@@ -560,9 +698,14 @@ def main() -> None:
 
     args = p.parse_args()
     app_dir = resolve_app_dir(args.app_dir, args.config)
+    # Triage memory sits beside slip.json, so it follows --config into the same repo.
+    triage_path = Path(args.config).expanduser().parent / TRIAGE_FILENAME
 
     if args.cmd == "list":
-        cmd_list(app_dir, include_all=args.all)
+        cmd_list(app_dir, triage_path, include_all=args.all, tags=args.tag,
+                 limit=args.limit, new_only=args.new)
+    elif args.cmd == "triage":
+        cmd_triage(app_dir, triage_path, args.report, args.notes)
     elif args.cmd == "receipt":
         cmd_receipt(app_dir, args.report, args.results, args.agent)
 
