@@ -15,6 +15,9 @@ phone ages reports out by retention.
 Subcommands:
   list      Emit JSON of pending reports (reads embedded id comments; falls back
             to the .json sidecar for legacy exports, then to plain markdown).
+  triage    Record what a run read, so a re-run needn't re-read it.
+  park      Hold notes under a named theme so they leave the default pull.
+  unpark    Release a theme (or single notes) back into the default pull.
   receipt   Write _results/<report>.result.json from a results file.
 """
 from __future__ import annotations
@@ -42,6 +45,18 @@ VALID_STATUSES = TERMINAL_STATUSES | {"deferred", "needs_info"}
 # and re-deriving every cluster. Kept beside slip.json in the repo, never in the
 # synced export folder: this is the resolver's own memory, not part of the loop.
 TRIAGE_FILENAME = "slip-triage.json"
+# A *parked* note is one the user deliberately held for a named future session —
+# a design round, an ideas round. It is still open work, and it still counts in
+# `pendingNoteCount`; it simply stops arriving in the default pull. That is the
+# whole mechanism: a note nobody pulls is a note nobody receipts, and aging is
+# driven by receipts, so parking freezes `deferredRuns` instead of ratcheting it.
+#
+# The problem this solves: `deferred` was doing two jobs — "cut from this round,
+# still live" and "waiting on a session that has no date". The second kind came
+# back every run, got re-read, got re-deferred with a near-identical summary, and
+# aged. The age counter exists to surface notes that are genuinely stuck, and
+# counting rounds of a decision already made is precisely what destroys it.
+PARK_THEME_RE = re.compile(r"^[\w][\w .-]{0,59}$")
 # A pending note this similar to an already-closed one is probably the same
 # complaint arriving twice — which usually means the first fix didn't take.
 REPEAT_SIMILARITY = 0.75
@@ -147,7 +162,7 @@ def is_noise(name: str) -> bool:
 
 def cmd_list(app_dir: Path, triage_path: Path, include_all: bool = False,
              tags: list[str] | None = None, limit: int | None = None,
-             new_only: bool = False) -> None:
+             new_only: bool = False, theme: str | None = None) -> None:
     if not app_dir.exists():
         fail(f"app folder not found: {app_dir}")
 
@@ -159,6 +174,7 @@ def cmd_list(app_dir: Path, triage_path: Path, include_all: bool = False,
 
     annotate_with_receipts(reports, app_dir)
     annotate_with_triage(reports, load_triage(triage_path))
+    annotate_with_parked(reports, load_parked(triage_path))
 
     if include_all:
         visible, truncated = reports, False
@@ -166,6 +182,12 @@ def cmd_list(app_dir: Path, triage_path: Path, include_all: bool = False,
         closed = resolved_index(reports, app_dir)
         visible = [pending_view(with_repeat_hints(r, closed))
                    for r in reports if not r["fullyHandled"]]
+        # `--theme` opens one park; the default pull closes all of them. Either
+        # way the note is selected on its park, never on the absence of a receipt.
+        if theme:
+            visible = select_notes(visible, theme_matcher(theme))
+        else:
+            visible = select_notes(visible, lambda n: "parked" not in n)
         if new_only:
             visible = select_notes(visible, lambda n: "triaged" not in n)
         if tags:
@@ -175,15 +197,19 @@ def cmd_list(app_dir: Path, triage_path: Path, include_all: bool = False,
 
     out = {
         "appDir": str(app_dir),
-        "filter": "all" if include_all else "pending",
+        "filter": f"theme:{theme}" if theme else ("all" if include_all else "pending"),
         "reportCount": len(reports),
         "pendingReportCount": sum(1 for r in reports if not r["fullyHandled"]),
         "noteCount": sum(len(r["notes"]) for r in reports),
         # The counts stay global on purpose: a narrowed pull must never make the
-        # backlog behind it look smaller than it is.
+        # backlog behind it look smaller than it is. Parked notes are pending —
+        # they are held, not resolved — so they stay inside `pendingNoteCount`
+        # and only drop out of `returnedNoteCount`.
         "pendingNoteCount": sum(r["pendingCount"] for r in reports),
         "agedNoteCount": aged_note_count(reports),
         "triagedNoteCount": triaged_note_count(reports),
+        "parkedNoteCount": parked_note_count(reports),
+        "parkedThemes": parked_themes(reports),
         "returnedNoteCount": sum(len(r["notes"]) for r in visible),
         "truncated": truncated,
         "duplicateHints": duplicate_hints(visible),
@@ -211,6 +237,12 @@ def tag_matcher(tags: list[str]):
         have = {str(t).lower() for t in note.get("tags") or []}
         return bool(wanted & have) or ("untagged" in wanted and not have)
     return keep
+
+
+def theme_matcher(theme: str):
+    """Case-insensitive match on a note's park theme."""
+    wanted = theme.strip().lower()
+    return lambda note: str((note.get("parked") or {}).get("theme", "")).lower() == wanted
 
 
 def by_priority(reports: list[dict]) -> list[dict]:
@@ -276,6 +308,29 @@ def triaged_note_count(reports: list[dict]) -> int:
     take from their gist instead of reopening their screenshots."""
     return sum(1 for rep in reports for note in rep["notes"]
                if note["priorStatus"] not in TERMINAL_STATUSES and note.get("triaged"))
+
+
+def open_notes(reports: list[dict]):
+    """Every still-open note across the reports, ignoring the ones receipts closed."""
+    return (note for rep in reports for note in rep["notes"]
+            if note["priorStatus"] not in TERMINAL_STATUSES)
+
+
+def parked_note_count(reports: list[dict]) -> int:
+    """Open notes currently held under a theme. Reported on every pull, including
+    the pulls that hide them — a held note that stops being counted is a lost one."""
+    return sum(1 for note in open_notes(reports) if note.get("parked"))
+
+
+def parked_themes(reports: list[dict]) -> dict:
+    """theme -> how many open notes are held under it, so a run can say what is
+    waiting and on what, rather than reporting a bare total nobody can act on."""
+    counts: dict[str, int] = {}
+    for note in open_notes(reports):
+        theme = (note.get("parked") or {}).get("theme")
+        if theme:
+            counts[theme] = counts.get(theme, 0) + 1
+    return dict(sorted(counts.items()))
 
 
 def duplicate_hints(reports: list[dict]) -> list[list[str]]:
@@ -589,15 +644,119 @@ def annotate_with_triage(reports: list[dict], triage: dict) -> None:
                 }
 
 
+def load_parked(path: Path) -> dict:
+    """Which notes are held, keyed the same way triage is. Kept in its own block
+    rather than as a field on the triage record: parking and reading are separate
+    facts, and a note can be parked before anyone has read it."""
+    if not path.exists():
+        return {}
+    try:
+        parked = json.loads(path.read_text()).get("parked")
+    except (json.JSONDecodeError, OSError, AttributeError):
+        return {}
+    return parked if isinstance(parked, dict) else {}
+
+
+def write_memory(path: Path, triage: dict, parked: dict) -> None:
+    """The resolver's own memory file, rewritten whole. Both blocks are always
+    written, so parking never silently drops what triage had recorded."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(
+        {"schema": SCHEMA_VERSION, "app": APP_NAME, "notes": triage, "parked": parked},
+        indent=2, ensure_ascii=False) + "\n")
+
+
+def annotate_with_parked(reports: list[dict], parked: dict) -> None:
+    """Hang each note's park on it, so `list` can hold it back from the default
+    pull and still account for it in the counts."""
+    for rep in reports:
+        for i, note in enumerate(rep["notes"]):
+            record = parked.get(triage_key(rep["report"], note["id"], i))
+            if record:
+                note["parked"] = record
+
+
+def report_note_ids(app_dir: Path, report: str) -> set:
+    """The stable ids a report actually contains — empty for a legacy export that
+    has none. Joined unresolved on purpose: `load_report` takes the path apart
+    with `relative_to(app_dir)`, and resolving one side and not the other breaks
+    that wherever the temp or home dir is itself a symlink (macOS `/var`)."""
+    return {n["id"] for n in load_report(app_dir / report, app_dir)["notes"] if n["id"]}
+
+
+def note_refs(entries, app_dir: Path, default_report: str | None) -> list[tuple[str, str]]:
+    """`(report, key)` pairs from a park/unpark file, validated against the reports
+    on disk. A park aimed at a note that doesn't exist would hold nothing while
+    reading as though it had — the same silent no-op a stray receipt noteId is."""
+    refs = []
+    for i, e in enumerate(entries):
+        report = str(e.get("report") or default_report or "").strip()
+        if not report:
+            fail(f"entry {i}: no report — give one per entry or pass --report")
+        md = (app_dir / report).resolve()
+        if not md.exists():
+            fail(f"entry {i}: report not found: {report}")
+        note_id = e.get("noteId")
+        known = report_note_ids(app_dir, report)
+        if note_id is not None and known and note_id not in known:
+            fail(f"entry {i}: note {note_id} is not in {report}")
+        refs.append((report, triage_key(report, note_id, e.get("index", 0))))
+    return refs
+
+
+def read_entries(notes_path: str) -> list:
+    data = json.loads(Path(notes_path).read_text())
+    entries = data.get("notes", data) if isinstance(data, dict) else data
+    if not isinstance(entries, list):
+        fail("file must be a list, or an object with a 'notes' list")
+    return entries
+
+
+def cmd_park(app_dir: Path, triage_path: Path, theme: str, notes_path: str,
+             report: str | None) -> None:
+    """Hold notes under a named theme. The theme is required and has to be a real
+    name: 'later' and 'backlog' are where work goes to die, and the point of the
+    park is that the user can ask for it back by name."""
+    theme = theme.strip()
+    if not PARK_THEME_RE.match(theme):
+        fail(f"bad theme {theme!r} — 1–60 chars, letters/digits/space/._- only")
+
+    refs = note_refs(read_entries(notes_path), app_dir, report)
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    parked = dict(load_parked(triage_path))
+    for _, key in refs:
+        parked[key] = {"theme": theme, "parkedAt": now}
+    write_memory(triage_path, load_triage(triage_path), parked)
+    print(f"{triage_path}: {len(refs)} note(s) parked under {theme!r}")
+
+
+def cmd_unpark(app_dir: Path, triage_path: Path, theme: str | None,
+               notes_path: str | None, report: str | None) -> None:
+    """Release a whole theme, or named notes, back into the default pull. This is
+    how an ideas round actually starts: the work comes back as ordinary open
+    work, and from here on it ages again like anything else."""
+    parked = dict(load_parked(triage_path))
+    if notes_path:
+        keys = {key for _, key in note_refs(read_entries(notes_path), app_dir, report)}
+    elif theme:
+        wanted = theme.strip().lower()
+        keys = {k for k, v in parked.items()
+                if str(v.get("theme", "")).lower() == wanted}
+    else:
+        fail("give --theme or --notes")
+    if not keys:
+        fail("nothing matched — no notes released")
+    for key in keys:
+        parked.pop(key, None)
+    write_memory(triage_path, load_triage(triage_path), parked)
+    print(f"{triage_path}: {len(keys)} note(s) released")
+
+
 def cmd_triage(app_dir: Path, triage_path: Path, report: str, notes_path: str) -> None:
     md = (app_dir / report).resolve()
     if not md.exists():
         fail(f"report not found: {report}")
-    data = json.loads(Path(notes_path).read_text())
-    entries = data.get("notes", data) if isinstance(data, dict) else data
-    if not isinstance(entries, list):
-        fail("triage file must be a list, or an object with a 'notes' list")
-
+    entries = read_entries(notes_path)
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     records = dict(load_triage(triage_path))
     for i, e in enumerate(entries):
@@ -613,10 +772,7 @@ def cmd_triage(app_dir: Path, triage_path: Path, report: str, notes_path: str) -
             "triagedAt": now,
         }
 
-    triage_path.parent.mkdir(parents=True, exist_ok=True)
-    triage_path.write_text(
-        json.dumps({"schema": SCHEMA_VERSION, "app": APP_NAME, "notes": records},
-                   indent=2, ensure_ascii=False) + "\n")
+    write_memory(triage_path, records, load_parked(triage_path))
     print(str(triage_path))
 
 
@@ -629,7 +785,8 @@ def cmd_receipt(app_dir: Path, report: str, results_path: str, agent: str) -> No
     if not isinstance(results, list):
         fail("results file must be a list, or an object with a 'results' list")
 
-    problems = [p for i, r in enumerate(results) for p in result_problems(r, i)]
+    known = report_note_ids(app_dir, report)
+    problems = [p for i, r in enumerate(results) for p in result_problems(r, i, known)]
     if problems:
         fail("bad results file:\n  - " + "\n  - ".join(problems))
 
@@ -664,7 +821,7 @@ def cmd_receipt(app_dir: Path, report: str, results_path: str, agent: str) -> No
     print(str(dest))
 
 
-def result_problems(r: dict, index: int) -> list[str]:
+def result_problems(r: dict, index: int, known_ids: set) -> list[str]:
     """Everything wrong with one result, so a bad file reports in full instead of
     one error per re-run.
 
@@ -679,6 +836,17 @@ def result_problems(r: dict, index: int) -> list[str]:
     status = r.get("status")
     if status not in VALID_STATUSES:
         return [f"{where}: unknown status {status!r} — use one of {', '.join(sorted(VALID_STATUSES))}"]
+
+    # A noteId that isn't in this report writes an outcome nowhere anything reads:
+    # `annotate_with_receipts` joins on the report's own ids, so the record is inert
+    # and the note it was meant for stays pending forever. It fails silently and it
+    # has happened for real — hence a hard refusal rather than a warning. Legacy
+    # reports carry no ids at all (`known_ids` empty) and still join positionally.
+    note_id = r.get("noteId")
+    if known_ids and note_id is not None and note_id not in known_ids:
+        return [f"{where}: noteId is not in this report — receipt it against the "
+                "report that actually contains it, or the outcome is written where "
+                "nothing will read it"]
 
     required = {
         "needs_info": ("question", "the question the user has to answer"),
@@ -751,10 +919,22 @@ def main() -> None:
                     help="Only notes with this tag; repeatable. `untagged` selects those with none")
     pl.add_argument("--limit", type=int, metavar="N",
                     help="Cap the notes returned, oldest report first")
+    pl.add_argument("--theme", metavar="NAME",
+                    help="Open a parked theme: only the notes held under it")
 
     pt = sub.add_parser("triage", help="Record what a run read, so a re-run needn't re-read it")
     pt.add_argument("--report", required=True, help="Report path relative to app dir")
     pt.add_argument("--notes", required=True, help="JSON file with the triaged notes")
+
+    pp = sub.add_parser("park", help="Hold notes under a named theme, out of the default pull")
+    pp.add_argument("--theme", required=True, metavar="NAME", help="What they're waiting on")
+    pp.add_argument("--notes", required=True, help="JSON file of {report, noteId} entries")
+    pp.add_argument("--report", help="Default report for entries that omit one")
+
+    pu = sub.add_parser("unpark", help="Release a theme (or named notes) back into the pull")
+    pu.add_argument("--theme", metavar="NAME", help="Release everything held under it")
+    pu.add_argument("--notes", help="JSON file of {report, noteId} entries to release")
+    pu.add_argument("--report", help="Default report for entries that omit one")
 
     pr = sub.add_parser("receipt", help="Write a resolution receipt")
     pr.add_argument("--report", required=True, help="Report path relative to app dir")
@@ -768,9 +948,13 @@ def main() -> None:
 
     if args.cmd == "list":
         cmd_list(app_dir, triage_path, include_all=args.all, tags=args.tag,
-                 limit=args.limit, new_only=args.new)
+                 limit=args.limit, new_only=args.new, theme=args.theme)
     elif args.cmd == "triage":
         cmd_triage(app_dir, triage_path, args.report, args.notes)
+    elif args.cmd == "park":
+        cmd_park(app_dir, triage_path, args.theme, args.notes, args.report)
+    elif args.cmd == "unpark":
+        cmd_unpark(app_dir, triage_path, args.theme, args.notes, args.report)
     elif args.cmd == "receipt":
         cmd_receipt(app_dir, args.report, args.results, args.agent)
 

@@ -44,7 +44,10 @@ subagent is for. A note can end the run still open in only two ways:
 - the **user cut it** from this round in the §4 quiz → `deferred`;
 - you asked a **real question** and don't have the answer yet → `needs_info`, question in the receipt.
 
-Both are the user's decision, recorded. Everything else in the batch gets driven to `fixed`,
+- the user **parked it under a theme** (§4a) → it leaves the default pull until they ask for that
+  theme back by name.
+
+All three are the user's decision, recorded. Everything else in the batch gets driven to `fixed`,
 `wont_fix` (considered together and deliberately dropped) or `duplicate` before the run ends.
 
 **Receipts are the state — this is what stops wasted effort.** Reports accumulate across sessions,
@@ -76,7 +79,7 @@ difference between `reportCount` and `pendingReportCount`, which is all it's wor
 it back at the user beyond a one-line count.
 
 Emits JSON: top-level `reportCount`, `pendingReportCount`, `noteCount`, `pendingNoteCount`,
-`agedNoteCount`, `duplicateHints` (over the open notes only), and `reports[]` — which holds only the
+`agedNoteCount`, `parkedNoteCount`, `parkedThemes`, `duplicateHints` (over the open notes only), and `reports[]` — which holds only the
 reports with open work. A live report has `pendingCount` and `notes[]` (`id`, `tags`,
 `text`, absolute `images[]`, plus `priorStatus` from any past receipt — `deferred`/`needs_info` are
 not terminal, so those notes come back). A `hasStableIds` flag marks legacy reports (those with no
@@ -90,6 +93,11 @@ re-defer — which is exactly why they must not be. Work them **first** within t
 one is going to stay open again, say so out loud in the wrap-up with its age, rather than letting it
 roll silently into a third run. `deferredRuns ≥ 2` means this run is the last honest chance to
 either land it or agree with the user to drop it as `wont_fix`.
+
+**`parkedNoteCount` is work the user is holding, not work that's gone** (§4a). Those notes aren't in
+`reports[]` — but they *are* inside `pendingNoteCount`, and `parkedThemes` says how many wait on
+each theme. Say it in the wrap-up every run (§8), and offer to open a theme when the defect pass
+finishes early. A park nobody is ever asked about is just a slower way to lose the work.
 
 A pending note may also carry **`possibleRepeatOf`** — see §3.
 
@@ -246,6 +254,40 @@ questions into one call instead of drip-feeding them. Ask when:
   only for something the user looked at and cut; a note this round never got to gets *no receipt at
   all*, keeps its place in the queue, and picks up no age. Blanket-deferring the tail would age the
   entire backlog in one go and destroy the one signal that says which notes are genuinely stuck.
+
+### 4a. Park what's waiting on a session, don't re-defer it every run
+`deferred` means **cut from this round, still live** — it comes back next run and it ages. That is
+right for a note the user skipped once. It is wrong for a note waiting on something that hasn't been
+scheduled: "held for the ideas round", "wants a design conversation". Those come back every run, get
+re-read, get re-deferred with a near-identical summary, and climb the age counter — which is how
+`deferredRuns` stops meaning "this is stuck" and starts meaning "nobody has run the ideas round yet".
+
+So when the user cuts work **for a named future session**, park it under that name:
+
+```json
+{ "notes": [ { "report": "2026-07-25/0803-we-need-to-do-this-for.md", "noteId": "<id>" } ] }
+```
+```
+python3 ~/.claude/skills/slip/slip.py park --theme "ideas round" --notes "<file.json>"
+```
+
+A parked note leaves the default pull, so no run reads it, so no run receipts it, so **its age stops
+moving**. It is still open work: `pendingNoteCount` still counts it, and `parkedNoteCount` /
+`parkedThemes` name what is waiting and on what. Nothing is hidden — it's held.
+
+Park only what the user actually chose to hold, and use their words for the theme. "later" and
+"backlog" are not themes; the point of a park is that it can be asked for back by name. Still write
+the note's `deferred` receipt with a summary saying who parked it and why — the phone reads the
+receipt, not this store, and the user should see the hold on their end too.
+
+To open a theme — this is what starts an ideas round:
+```
+python3 ~/.claude/skills/slip/slip.py list --theme "ideas round"
+python3 ~/.claude/skills/slip/slip.py unpark --theme "ideas round"    # back to ordinary open work
+```
+`unpark` releases them; from then on they age again like anything else. Offer it when a defect pass
+finishes early, and whenever a theme has been sitting for a while — a park the user never gets asked
+about is just a slower way to lose the work.
 
 **Read the code before asking** — never spend a question on something the codebase already answers
 (a note may describe as missing something that already exists, or exists but isn't discoverable;
@@ -416,6 +458,11 @@ summary *is* the deliverable the phone shows back.
 it already paid, in a verified change. If you can't fill the field, you don't have that outcome:
 it's unfinished work, and it belongs back in §5.
 
+**`noteId` must be a note that report actually contains** — the script now refuses anything else. A
+stray id writes an outcome nowhere anything reads (receipts join on the report's own ids), so the
+record goes inert and the note it was meant for stays pending forever, silently. If a cluster spans
+reports, receipt each note against its own report.
+
 Only include the notes **this run worked**: the script merges results over the report's last receipt,
 so untouched notes keep the outcome they already had. `deferredRuns`/`deferredSince` are the
 script's to maintain — it ages a note that stays open and clears it when one closes. Don't write
@@ -449,6 +496,12 @@ On a sliced batch (§1), close with the state of the queue: how many notes remai
 those are now triaged and ready to work cheaply next time, and what the next run should pull first.
 That standing number is the thing the user is actually tracking — never let a round end reporting
 only the slice it happened to take.
+
+**Name what's parked and what it's waiting on.** One line per theme — `parkedThemes` gives the
+counts — saying what would open it: "3 held for the ideas round; say the word and I'll pull it."
+Parked notes don't age, which is the point, but it also means nothing else will ever remind the user
+they exist. This line is the only thing that does. If a theme has been sitting for several runs, ask
+outright whether to run it, drop it, or keep holding.
 
 **Account for every open note by name.** Anything still `deferred` or `needs_info` gets its own line:
 the note, its age (`deferredRuns` + `deferredSince` — "open since 2026-07-17, third run"), the exact

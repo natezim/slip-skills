@@ -74,6 +74,23 @@ class SlipTestCase(unittest.TestCase):
     def notes(self, **kwargs):
         return [n for r in self.listing(**kwargs)["reports"] for n in r["notes"]]
 
+    def park(self, note_ids, theme="ideas round", report=RELPATH):
+        path = self.root / "park-in.json"
+        path.write_text(json.dumps(
+            {"notes": [{"report": report, "noteId": n} for n in note_ids]}))
+        with redirect_stdout(io.StringIO()):
+            slip.cmd_park(self.app, self.triage, theme, str(path), None)
+
+    def unpark(self, theme=None, note_ids=None, report=RELPATH):
+        path = None
+        if note_ids is not None:
+            path = self.root / "unpark-in.json"
+            path.write_text(json.dumps(
+                {"notes": [{"report": report, "noteId": n} for n in note_ids]}))
+        with redirect_stdout(io.StringIO()):
+            slip.cmd_unpark(self.app, self.triage, theme,
+                            str(path) if path else None, None)
+
     def add_report(self, rel, body):
         path = self.app / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -223,6 +240,95 @@ class SlipTestCase(unittest.TestCase):
     def test_triage_never_closes_a_note(self):
         self.triage_notes([{"noteId": NOTE_A, "gist": "read it"}])
         self.assertEqual(self.listing()["pendingNoteCount"], 2)
+
+    # -- parking: held work must not read as resolved work ----------------
+    def test_parked_notes_leave_the_pull_but_not_the_count(self):
+        # The whole point. A parked note is held, not resolved — if parking made
+        # the backlog number shrink it would be a nicer-looking way to lose work.
+        self.park([NOTE_B])
+        listing = self.listing()
+        self.assertEqual([n["id"] for n in self.notes()], [NOTE_A])
+        self.assertEqual(listing["pendingNoteCount"], 2)
+        self.assertEqual(listing["returnedNoteCount"], 1)
+        self.assertEqual(listing["parkedNoteCount"], 1)
+        self.assertEqual(listing["parkedThemes"], {"ideas round": 1})
+
+    def test_theme_opens_exactly_that_park(self):
+        self.park([NOTE_A], theme="design session")
+        self.park([NOTE_B], theme="ideas round")
+        self.assertEqual([n["id"] for n in self.notes(theme="ideas round")], [NOTE_B])
+        self.assertEqual([n["id"] for n in self.notes(theme="IDEAS ROUND")], [NOTE_B])
+        self.assertEqual(self.notes(theme="nobody-parked-here"), [])
+
+    def test_parking_freezes_the_age_instead_of_ratcheting_it(self):
+        # The bug parking exists for: six real notes sat at deferredRuns 2–4 purely
+        # because each run re-read them and re-deferred them with the same summary.
+        self.receipt([{"noteId": NOTE_B, "status": "deferred", "summary": "user cut it"}])
+        self.park([NOTE_B])
+        for _ in range(3):  # three runs that never see it, so never receipt it
+            self.assertNotIn(NOTE_B, [n["id"] for n in self.notes()])
+        self.unpark(theme="ideas round")
+        self.assertEqual(self.notes()[-1]["deferredRuns"], 1)  # not 4
+
+    def test_unparking_returns_it_as_ordinary_open_work(self):
+        self.park([NOTE_B])
+        self.unpark(theme="ideas round")
+        self.assertEqual([n["id"] for n in self.notes()], [NOTE_A, NOTE_B])
+        self.assertEqual(self.listing()["parkedNoteCount"], 0)
+        self.assertNotIn("parked", self.notes()[-1])
+
+    def test_unparking_a_single_note_leaves_the_rest_held(self):
+        self.park([NOTE_A, NOTE_B])
+        self.unpark(note_ids=[NOTE_A])
+        self.assertEqual(self.listing()["parkedNoteCount"], 1)
+        self.assertEqual([n["id"] for n in self.notes()], [NOTE_A])
+
+    def test_park_and_triage_do_not_overwrite_each_other(self):
+        # One memory file, two independent facts. Parking used to be tempting to
+        # store as a triage field, which would have made a held note read as read.
+        self.triage_notes([{"noteId": NOTE_A, "gist": "trailing space"}])
+        self.park([NOTE_B])
+        self.assertEqual(self.listing()["triagedNoteCount"], 1)
+        self.assertEqual(self.listing()["parkedNoteCount"], 1)
+        self.triage_notes([{"noteId": NOTE_B, "gist": "compact mode"}])
+        self.assertEqual(self.listing()["parkedNoteCount"], 1)  # survived the triage write
+
+    def test_park_refuses_a_note_that_is_not_in_the_report(self):
+        err = io.StringIO()
+        with self.assertRaises(SystemExit), redirect_stderr(err):
+            self.park(["00000000-0000-0000-0000-00000000DEAD"])
+        self.assertIn("not in", err.getvalue())
+
+    def test_park_requires_a_real_theme_name(self):
+        err = io.StringIO()
+        with self.assertRaises(SystemExit), redirect_stderr(err):
+            self.park([NOTE_B], theme="  ")
+        self.assertIn("theme", err.getvalue())
+
+    def test_unpark_that_matches_nothing_says_so(self):
+        err = io.StringIO()
+        with self.assertRaises(SystemExit), redirect_stderr(err):
+            self.unpark(theme="never-used")
+        self.assertIn("nothing matched", err.getvalue())
+
+    def test_all_still_shows_parked_notes(self):
+        self.park([NOTE_B])
+        ids = [n["id"] for r in self.listing(include_all=True)["reports"] for n in r["notes"]]
+        self.assertIn(NOTE_B, ids)
+
+    # -- receipts aimed at the wrong report -------------------------------
+    def test_receipt_refuses_a_noteid_from_another_report(self):
+        # Found in a real folder: a 3-note report carrying 4 records, the extra one
+        # a note from elsewhere. It joins to nothing, so the outcome is unreadable
+        # and the note it was meant for stays pending forever. Silent until now.
+        self.assert_refused(
+            [{"noteId": "00000000-0000-0000-0000-00000000DEAD", "status": "fixed"}],
+            because="not in this report")
+
+    def test_legacy_reports_still_receipt_positionally(self):
+        self.add_report("2026-07-18/0900-legacy.md", "# R\n\n## 1. 9:00 AM\nflat old note\n")
+        self.receipt([{"status": "fixed", "commit": "abc1234"}],
+                     report="2026-07-18/0900-legacy.md")
 
     # -- slicing a big backlog -------------------------------------------
     def test_counts_stay_global_when_the_pull_is_narrowed(self):

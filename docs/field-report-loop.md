@@ -178,6 +178,13 @@ every run. That state is deliberately *outside* this contract: the reference imp
 in the repo it fixes, not in the shared folder, because it's the resolver's working memory and means
 nothing to the phone. Nothing here should ever require it.
 
+The same store may hold a **park** — notes the user has deliberately held for a named future session
+("the ideas round"), which the resolver keeps out of its own default pull so they aren't re-read and
+re-deferred every run. Aging is driven by receipts, so a note nobody pulls is a note nobody receipts,
+and its `deferredRuns` stops climbing; that's the whole mechanism, and it needs no new status. On the
+wire a parked note is simply `deferred` with a summary saying who held it and why, which is what the
+phone shows. A resolver that keeps no park is still fully conformant.
+
 Because a closed note's text is no longer shown, `list` carries one signal back across that edge: a
 pending note that closely echoes a closed one gets `possibleRepeatOf`, naming the earlier note and
 the outcome its receipt recorded. It is a lexical match — a re-report in near-identical words fires
