@@ -27,7 +27,7 @@ Slip/<Project>/
 ├── 2026-07-18-0904-action-section.md
 ├── _results/                         # receipts written by a resolver, read by the phone
 │   └── 2026-07-17-1731-weird-space.result.json
-└── README.md                         # self-describing; written once (refreshed only if changed)
+└── README.md                         # self-describing; written once, only when absent
 ```
 
 - Flat, **not** nested: everything lives directly in `<Project>/`, the date leading every filename so
