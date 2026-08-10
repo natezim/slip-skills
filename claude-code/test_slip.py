@@ -21,7 +21,7 @@ NOTE_A = "2AB1F73C-EE11-4273-8653-F2C3C322C6BD"
 NOTE_B = "9F3A0000-0000-0000-0000-000000000002"
 
 REPORT = """---
-schema: 2
+schema: 3
 project: Slip
 ---
 
@@ -31,14 +31,17 @@ project: Slip
 <!-- id: {a} -->
 Weird space in the export.
 
-![screenshot](images/1731-001.png)
+![screenshot](2026-07-17-1731-001.png)
 
 ## 2. 5:31 PM · idea
 <!-- id: {b} -->
 Add a compact mode.
 """.format(a=NOTE_A, b=NOTE_B)
 
-RELPATH = "2026-07-17/1731-weird-space.md"
+# Schema 3 is flat: the report and its screenshot sit directly in the app folder,
+# the date leading each filename. (Legacy schema-2 `<day>/…` reports still parse —
+# several tests below add one to prove the two layouts coexist.)
+RELPATH = "2026-07-17-1731-weird-space.md"
 
 
 class SlipTestCase(unittest.TestCase):
@@ -47,9 +50,9 @@ class SlipTestCase(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.app = self.root / "app"
-        (self.app / "2026-07-17" / "images").mkdir(parents=True)
+        self.app.mkdir(parents=True)
         (self.app / RELPATH).write_text(REPORT)
-        (self.app / "2026-07-17" / "images" / "1731-001.png").write_bytes(b"")
+        (self.app / "2026-07-17-1731-001.png").write_bytes(b"")
         self.triage = self.root / "triage.json"
 
     # -- helpers ---------------------------------------------------------
@@ -346,15 +349,16 @@ class SlipTestCase(unittest.TestCase):
         self.add_report("2026-07-18/0900-plain.md", "# R\n\n## 1. 9:00 AM\nno tag here\n")
         self.assertEqual([n["text"] for n in self.notes(tags=["untagged"])], ["no tag here"])
 
-    def test_pull_order_follows_capture_date_not_export_folder(self):
-        # Day-folders are keyed to the *export*; a note can sit on the phone for
-        # days first, so a newer folder can hold the oldest open thought.
+    def test_pull_order_follows_capture_date_not_export_date(self):
+        # A report's filename date is the *export*; a note can sit on the phone for
+        # days first, so a newer report can hold the oldest open thought. (This one
+        # is a legacy `<day>/…` report, proving mixed layouts sort together.)
         self.add_report("2026-07-20/0900-sent-late.md",
                         "# R\n\n## 1. 9:00 AM\n"
                         "<!-- id: 33330000-0000-0000-0000-000000000003 "
                         "captured: 2026-07-10T08:00:00Z -->\ncaptured long ago\n")
         # Fixture report's notes carry no captured: stamp, so it falls back to its
-        # folder date (2026-07-17) — later than the 07-10 capture above.
+        # filename's leading date (2026-07-17) — later than the 07-10 capture above.
         self.assertEqual(self.listing()["reports"][0]["report"], "2026-07-20/0900-sent-late.md")
 
     def test_aged_reports_are_pulled_ahead_of_merely_older_ones(self):

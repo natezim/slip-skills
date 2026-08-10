@@ -136,7 +136,7 @@ triage entry — this is the memory that makes a hundred-note backlog survivable
                "cluster": "short-slug", "kind": "bug|idea|question", "sawScreenshot": true } ] }
 ```
 ```
-python3 ~/.claude/skills/slip/slip.py triage --report "<day>/<report>.md" --notes "<file.json>"
+python3 ~/.claude/skills/slip/slip.py triage --report "<report>.md" --notes "<file.json>"
 ```
 
 It lands in `.claude/slip-triage.json` — repo-local, never in the synced folder; the phone has no
@@ -419,7 +419,7 @@ Per cluster, in order:
    is in the tree.
 3. **Commit** in the repo's own conventions (defer to CLAUDE.md / AGENTS.md when present). Identify
    the note in the body so the commit traces back to the report:
-   `Field-report: <day>/<report>.md (note <noteId>)`
+   `Field-report: <report>.md (note <noteId>)`
 4. **Push** before starting the next cluster, so a long batch is never all-or-nothing.
 
 Then carry the SHA into the receipt for every note in the cluster — that makes the receipt the
@@ -468,15 +468,16 @@ so untouched notes keep the outcome they already had. `deferredRuns`/`deferredSi
 script's to maintain — it ages a note that stays open and clears it when one closes. Don't write
 them yourself.
 
-The report path is relative to the app dir and includes its day-folder, e.g.
-`2026-07-17/1731-weird-space.md`. Then:
+The report path is relative to the app dir — a flat, date-led filename, e.g.
+`2026-07-17-1731-weird-space.md` (older exports may instead be `<day>/<report>.md`; pass whatever
+`list` gave you). Then:
 ```
-python3 ~/.claude/skills/slip/slip.py receipt --report "<day>/<report>.md" --results "<file.json>"
+python3 ~/.claude/skills/slip/slip.py receipt --report "<report>.md" --results "<file.json>"
 ```
 Write a receipt for **every** report you touched, even one whose items were already shipped (mark
 those `fixed`/`duplicate`) — the receipt is what lets future runs skip it. There is **no archive
-step**: reports are immutable and dated, receipts carry the state, and the phone purges old
-day-folders on its retention window. A report with `deferred`/`needs_info` notes just stays pending
+step**: reports are immutable and dated, receipts carry the state, and the phone purges old dated
+reports on its retention window. A report with `deferred`/`needs_info` notes just stays pending
 until a later run resolves it (put the open question in the `question` field).
 
 ## 8. Wrap up

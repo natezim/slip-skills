@@ -12,37 +12,40 @@ different agent, or the Claude Code `slip` skill (the reference implementation, 
 author). The app never assumes Claude Code, or any resolver, exists.
 
 Both the Swift app and any resolver code against the formats defined here. The **report/export
-format is `schema: 2`**; the **receipt format is its own `schema: 1`** (they version independently).
+format is `schema: 3`**; the **receipt format is its own `schema: 1`** (they version independently).
 
 ## Folder layout (per project, in the user's chosen folder)
 
-Exports are **immutable, per-day-organized markdown**. One layout for every destination (custom
-folder, the app's iCloud container, and share):
+Exports are **immutable, flat, date-led markdown**. One layout for every destination (custom folder,
+the app's iCloud container, and share):
 
 ```
 Slip/<Project>/
-├── 2026-07-17/
-│   ├── 1731-weird-space.md        # one report per send; <HHmm>-<slug>.md
-│   └── images/
-│       ├── 1731-001.png           # screenshots, HHmm-prefixed, co-located in the day
-│       └── 1731-002.jpg           # …in whichever format encoded smaller; see below
-├── 2026-07-18/
-│   └── 0904-action-section.md
-├── _results/                      # receipts written by a resolver, read by the phone
+├── 2026-07-17-1731-weird-space.md    # one report per send; <yyyy-MM-dd>-<HHmm>-<slug>.md
+├── 2026-07-17-1731-001.png           # screenshots, date+HHmm-prefixed, beside their report
+├── 2026-07-17-1731-002.jpg           # …in whichever format encoded smaller; see below
+├── 2026-07-18-0904-action-section.md
+├── _results/                         # receipts written by a resolver, read by the phone
 │   └── 2026-07-17-1731-weird-space.result.json
-└── README.md                      # self-describing; regenerated on every export
+└── README.md                         # self-describing; written once (refreshed only if changed)
 ```
 
-- One report file per **send**, inside a `<yyyy-MM-dd>/` day-folder; images live in that day's
-  `images/`, prefixed with the send's `HHmm` so several sends in a day never collide.
-- **Bounded, if the capture side is sweeping:** ~1 folder/day. The app purges whole day-folders past
-  its retention window — that's the only cleanup; nothing is ever moved or archived. Note that in
-  Slip this sweep is **opt-in for a custom export folder** (`cleanExportFolder`), because the folder
-  belongs to the user, not the app. With it off the loop still works and the folder grows without
-  limit, so a resolver must not assume the batch it's handed is bounded, recent, or complete.
-- `_results/` and `images/` are reserved names; discovery on both sides ignores them as reports.
+- Flat, **not** nested: everything lives directly in `<Project>/`, the date leading every filename so
+  reports and their screenshots sort and group by the day (then time) they were sent. There is no
+  per-day folder — a File Provider (Dropbox) forks a freshly-created day-folder to `<day> (1)` on
+  every send, so the only folder the app makes is the stable, reused `<Project>/`. (Older exports may
+  still use schema-2 `<yyyy-MM-dd>/` day-folders with an `images/` subdir; a `*.md` glob finds reports
+  in either layout, and image links are always relative to the report, so both resolve.)
+- One report file per **send**; its screenshots sit beside it as `<yyyy-MM-dd>-<HHmm>-NNN.<ext>`.
+- **Bounded, if the capture side is sweeping:** the app purges reports (and their screenshots) whose
+  leading date is past its retention window — that's the only cleanup; nothing is ever moved or
+  archived. Note that in Slip this sweep is **opt-in for a custom export folder** (`cleanExportFolder`),
+  because the folder belongs to the user, not the app. With it off the loop still works and the folder
+  grows without limit, so a resolver must not assume the batch it's handed is bounded, recent, or complete.
+- `_results/` is a reserved name; discovery ignores it as a report, as is any file without a leading
+  `<yyyy-MM-dd>` (e.g. `README.md`) and the legacy `images/` subdir.
 
-## Report — `<day>/<HHmm>-<slug>.md` (written by Slip)
+## Report — `<yyyy-MM-dd>-<HHmm>-<slug>.md` (written by Slip)
 
 Human-readable **and** machine-parseable. Machine metadata rides in the YAML frontmatter, and each
 note's stable `id` is embedded as an HTML comment right after its heading — invisible when the
@@ -50,7 +53,7 @@ markdown is read, trivial to parse. **There is no `.json` sidecar.**
 
 ```markdown
 ---
-schema: 2
+schema: 3
 project: Slip
 exported: 2026-07-17T21:31:08Z
 device: { model: iPhone16,2, os: iOS 26.5, app: "1.0 (148)" }
@@ -68,7 +71,7 @@ Captured 2026-07-17 • 2 notes • tags: bug (1), idea (1)
 <!-- id: 2AB1F73C-EE11-4273-8653-F2C3C322C6BD captured: 2026-07-17T17:30:00Z -->
 This has a lot of weird space in it…
 
-![screenshot](images/1731-001.png)
+![screenshot](2026-07-17-1731-001.png)
 
 ## 2. 5:31 PM · idea
 <!-- id: 9F3A0000-0000-0000-0000-000000000002 captured: 2026-07-17T17:31:00Z -->
@@ -86,12 +89,13 @@ Rules:
 - The comment sits between a note's `## N.` heading and its body; strip it before treating the rest
   as note text.
 - An empty note body (`_(no note)_`) means a **screenshot-only** capture; the image is the content.
-- `images` paths are relative to the report `.md`, so they resolve the same for a person or a tool.
-- **Never infer an image's extension — follow the link.** A day-folder may hold both `.png` and
+- Image paths are relative to the report `.md` (a bare `<yyyy-MM-dd>-<HHmm>-NNN.<ext>` beside it), so
+  they resolve the same for a person or a tool.
+- **Never infer an image's extension — follow the link.** A project folder may hold both `.png` and
   `.jpg`: Slip encodes each capture whichever way comes out smaller, which is PNG for flat UI with
-  text and JPEG for photographs. Everything is `.png` in older sends. Match by the `HHmm-NNN` prefix
-  or by reading the markdown link; matching on `.png` silently drops half the screenshots, and
-  writing a copy under a hardcoded `.png` name mislabels the bytes inside it.
+  text and JPEG for photographs. Everything is `.png` in older sends. Match by the filename prefix or
+  by reading the markdown link; matching on `.png` silently drops half the screenshots, and writing a
+  copy under a hardcoded `.png` name mislabels the bytes inside it.
 
 **Back-compat:** older exports were a flat `<timestamp>-<slug>.md` plus a `<timestamp>-<slug>.json`
 sidecar (report `schema: 1`). Resolvers should still read that sidecar when a report has no embedded
@@ -100,8 +104,9 @@ id comments. Those legacy reports age out via retention; no migration is perform
 ## Receipt — `_results/<report-name>.result.json` (written by the resolver, read by Slip)
 
 One receipt per report processed. The name is the report's relative path flattened with `-`, so a
-per-day report maps to a unique, date-led receipt (`2026-07-17/1731-weird-space.md` →
-`2026-07-17-1731-weird-space.result.json`). Joins to notes by `noteId`.
+flat report maps to a same-named receipt (`2026-07-17-1731-weird-space.md` →
+`2026-07-17-1731-weird-space.result.json`) and a legacy `<day>/…` path folds the slash to the same
+result. Joins to notes by `noteId`.
 
 ```json
 {
@@ -159,7 +164,7 @@ clears its resolved status and pulls it back out of the Fixes box.
 ## Loop, end to end
 
 1. **Capture** (phone) — note created; optional on-device tidy/auto-tag runs at finalize.
-2. **Export** (phone) — writes `<day>/<HHmm>-<slug>.md` (ids embedded) + images to `Slip/<Project>/`.
+2. **Export** (phone) — writes `<yyyy-MM-dd>-<HHmm>-<slug>.md` (ids embedded) + images, flat in `Slip/<Project>/`.
 3. **Fix** (resolver, e.g. the `slip` skill on the Mac) — parse reports, dedupe/cluster, fix,
    **verify**, commit.
 4. **Receipt** (resolver) — write `_results/…result.json`. Nothing is moved: the receipt is the state.
@@ -195,6 +200,8 @@ anything is new.
 
 - Files are the only channel. Either side may be offline; state reconciles on next read.
 - `noteId` is the single join key across report and receipt. Never reuse or rewrite it.
-- Reports are **immutable and dated**. Reserved names (`_results/`, `images/`) are never reports.
+- Reports are **immutable and dated**, flat in `<Project>/`. `_results/` (and any file without a
+  leading `<yyyy-MM-dd>`, like `README.md`, plus the legacy `images/` subdir) is never a report.
 - **Receipts are the state; nothing is archived.** Old reports disappear only by the app's retention
-  (it deletes whole day-folders, and ages out receipts), never by a resolver moving or deleting them.
+  (it deletes dated report files + their screenshots, and ages out receipts), never by a resolver
+  moving or deleting them.

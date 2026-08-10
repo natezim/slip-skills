@@ -4,9 +4,9 @@ There's no packaged skill here yet — but Slip exports are self-describing, so 
 Point Gemini CLI at your project with the export folder reachable, and paste:
 
 ```
-Read every report in <path-to>/Slip/<App>/ (dated *.md under <yyyy-MM-dd>/ day-folders; skip
-_results/ and images/). Each note's stable `id` is embedded as an <!-- id: … --> HTML comment after
-its heading. For each note: understand it (open referenced screenshots), find the relevant code, and
+Read every report in <path-to>/Slip/<App>/ (flat, date-led *.md named <yyyy-MM-dd>-<HHmm>-<slug>.md,
+directly in that folder; skip _results/, README.md, and any legacy images/ dir). Each note's stable
+`id` is embedded as an <!-- id: … --> HTML comment after its heading. For each note: understand it (open referenced screenshots), find the relevant code, and
 fix what's clearly fixable. Ask before anything risky.
 
 When you finish a note, append to _results/<report-name>.result.json in this shape:

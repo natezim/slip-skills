@@ -8,13 +8,14 @@ Add a project rule so Cursor knows how to handle Slip field reports. Create
 description: How to handle Slip field reports
 ---
 
-Bug/idea reports from the Slip app live in `~/Dropbox/Slip/<App>/` (set your path). Reports are dated
-`*.md` files under `<yyyy-MM-dd>/` day-folders; each note's stable `id` is embedded as an
-`<!-- id: … -->` HTML comment after its heading. Screenshots sit in the day's `images/`; receipts go
-in a reserved `_results/` dir.
+Bug/idea reports from the Slip app live in `~/Dropbox/Slip/<App>/` (set your path). Reports are flat,
+date-led `*.md` files (`<yyyy-MM-dd>-<HHmm>-<slug>.md`) directly in that folder; each note's stable
+`id` is embedded as an `<!-- id: … -->` HTML comment after its heading. Screenshots sit beside each
+report (`<yyyy-MM-dd>-<HHmm>-NNN.<ext>`); receipts go in a reserved `_results/` dir. (Older exports
+may still use `<yyyy-MM-dd>/` day-folders with an `images/` subdir — read both.)
 
 When asked to handle Slip reports:
-- Read the pending reports (skip `_results/`, `images/`, `README.md`); open referenced screenshots.
+- Read the pending reports (skip `_results/`, `README.md`, and any legacy `images/` dir); open referenced screenshots.
 - Dedupe, fix what's clear, ask before anything risky.
 - Write a receipt to `_results/<report-name>.result.json`:
   { "schema": 1, "project": "<App>", "results": [

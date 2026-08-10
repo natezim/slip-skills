@@ -6,11 +6,13 @@ the parts that must be exact: discovering pending reports, emitting them as clea
 structured JSON, and writing schema-correct resolution receipts. Stdlib only.
 See docs/field-report-loop.md for the contract.
 
-Reports are immutable, per-day-organized markdown (schema 2): each note's stable
-`id` is embedded as an HTML comment after its heading — no `.json` sidecar. Old
-exports (flat `.md` + `.json` sidecars) still parse; the sidecar reader is kept
-as a fallback. Nothing is moved or archived: receipts are the state, and the
-phone ages reports out by retention.
+Reports are immutable markdown (schema 3): flat in `<Project>/`, the date leading
+each filename (`<yyyy-MM-dd>-<HHmm>-<slug>.md`), each note's stable `id` embedded
+as an HTML comment after its heading — no `.json` sidecar. Older exports still
+parse too: schema-2 `<day>/…` day-folders (a `*.md` glob finds them either way),
+and legacy flat `.md` + `.json` sidecars (the sidecar reader is kept as a
+fallback). Nothing is moved or archived: receipts are the state, and the phone
+ages reports out by retention.
 
 Subcommands:
   list      Emit JSON of pending reports (reads embedded id comments; falls back
@@ -33,7 +35,7 @@ from pathlib import Path
 
 SCHEMA_VERSION = 1  # receipt schema (independent of the export/report schema)
 APP_NAME = "Slip"
-RESERVED_DIRS = {"_results", "images"}
+RESERVED_DIRS = {"_results", "images"}  # "images" only exists in legacy schema-2 day-folders
 RESERVED_FILES = {"README.md"}  # the self-describing export README, not a report
 DEFAULT_DROP_ROOT = "~/Dropbox/Slip"  # where Slip exports; one subfolder per app
 # Receipt statuses that close a note out for good. `deferred`/`needs_info` do not —
@@ -63,7 +65,7 @@ REPEAT_SIMILARITY = 0.75
 MIN_REPEAT_MATCH_CHARS = 25  # below this, short notes match each other on noise
 HEADING_RE = re.compile(r"^##\s+\d+\.\s*(.*)$")
 IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
-# The per-note machine tag Slip embeds after each heading (schema 2), e.g.
+# The per-note machine tag Slip embeds after each heading (schema 2+), e.g.
 #   <!-- id: 2AB1F73C-EE11-4273-8653-F2C3C322C6BD captured: 2026-07-17T17:30:00Z -->
 ID_COMMENT_RE = re.compile(
     r"<!--\s*id:\s*([0-9A-Fa-f-]{36})(?:\s+captured:\s*(\S+))?\s*-->"
@@ -250,18 +252,20 @@ def by_priority(reports: list[dict]) -> list[dict]:
 
     Both orderings guard against losing work, at different timescales: age says a
     note is stuck and getting quietly re-skipped, and date matters because the phone
-    deletes whole day-folders on its retention window — an old note not worked is an
-    old note that eventually disappears unresolved. Ordering here rather than only
-    under `--limit` keeps a truncated pull a prefix of the full one.
+    deletes old reports on its retention window — an old note not worked is an old
+    note that eventually disappears unresolved. Ordering here rather than only under
+    `--limit` keeps a truncated pull a prefix of the full one.
 
-    "Oldest" means oldest *capture*, not oldest day-folder: folders are keyed to the
-    export, and a note can sit on the phone for days before being sent, so a new
-    folder can hold the oldest open thought in the whole batch.
+    "Oldest" means oldest *capture*, not oldest export: a note can sit on the phone
+    for days before being sent, so a newer report can hold the oldest open thought
+    in the whole batch.
     """
     def earliest_capture(rep: dict) -> str:
         stamps = [n["capturedAt"] for n in rep["notes"] if n.get("capturedAt")]
-        # Legacy notes carry no timestamp; fall back to the day-folder's date,
-        # pinned to midnight so it sorts with (and ahead of) that day's captures.
+        # Legacy notes carry no timestamp; fall back to the report's leading date
+        # (`report[:10]` — the same `yyyy-MM-dd` whether the report is flat schema-3
+        # or a schema-2 `<day>/…` path), pinned to midnight so it sorts with (and
+        # ahead of) that day's captures.
         return min(stamps) if stamps else rep["report"][:10] + "T00:00:00Z"
 
     return sorted(reports,  # default= for a report file that parsed to no notes at all
@@ -417,12 +421,12 @@ def with_repeat_hints(report: dict, index: list[dict]) -> dict:
 
 
 def load_report(md: Path, app_dir: Path) -> dict:
-    """Prefer embedded id comments in the markdown (schema 2). Fall back to a
+    """Prefer embedded id comments in the markdown (schema 2+). Fall back to a
     legacy `.json` sidecar if present, then to plain markdown with no ids."""
     rel = str(md.relative_to(app_dir))
     report = report_from_markdown(md, app_dir, rel)
     if report["hasStableIds"]:
-        return report  # schema 2 — ids embedded in the markdown
+        return report  # schema 2+ — ids embedded in the markdown
 
     sidecar = md.with_suffix(".json")
     if sidecar.exists():
@@ -471,7 +475,7 @@ def report_from_markdown(md: Path, app_dir: Path, rel: str) -> dict:
         "report": rel,
         "sidecar": None,
         "schema": schema,
-        # schema 2 embeds a stable id per note; a legacy export (no id comments,
+        # schema 2+ embeds a stable id per note; a legacy export (no id comments,
         # no sidecar) can't be matched back by the phone.
         "hasStableIds": has_ids,
         "project": front.get("project"),
@@ -547,9 +551,11 @@ def normalize(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 def receipt_filename(report: str) -> str:
-    """Flat, collision-free receipt name from a report's relative path — so
-    per-day reports (e.g. `2026-07-17/1731-slug.md`) map to a unique, date-led
-    `2026-07-17-1731-slug.result.json` that never clobbers another day's."""
+    """Flat, collision-free receipt name from a report's relative path. A flat
+    schema-3 report (`2026-07-17-1731-slug.md`) maps to
+    `2026-07-17-1731-slug.result.json`; a legacy schema-2 path
+    (`2026-07-17/1731-slug.md`) folds the slash to the same name — so both land on a
+    unique, date-led receipt that never clobbers another day's."""
     stem = report[:-3] if report.endswith(".md") else report
     return stem.replace("/", "-").replace("\\", "-") + ".result.json"
 

@@ -5,14 +5,15 @@ Drop this file at your repo root (Codex reads `AGENTS.md`). Set the export path 
 ## Field reports
 
 Bug/idea reports captured with the Slip app live in `~/Dropbox/Slip/<App>/` (edit to your path).
-Layout: dated `*.md` reports under `<yyyy-MM-dd>/` day-folders, each note's stable `id` embedded as
-an `<!-- id: … -->` HTML comment after its heading; screenshots in the day's `images/`; a reserved
-`_results/` dir for receipts.
+Layout: flat, date-led `*.md` reports (`<yyyy-MM-dd>-<HHmm>-<slug>.md`) directly in that folder, each
+note's stable `id` embedded as an `<!-- id: … -->` HTML comment after its heading; screenshots beside
+each report (`<yyyy-MM-dd>-<HHmm>-NNN.<ext>`); a reserved `_results/` dir for receipts. (Older exports
+may still use `<yyyy-MM-dd>/` day-folders with an `images/` subdir — read both.)
 
 When asked to handle Slip reports:
 
-1. Read the pending reports — every `*.md` except `README.md`, skipping the reserved `_results/` and
-   `images/` dirs. Open referenced screenshots.
+1. Read the pending reports — every `*.md` except `README.md`, skipping the reserved `_results/` (and
+   any legacy `images/`) dir. Open referenced screenshots.
 2. Dedupe notes describing the same issue, then fix what's clearly fixable. Ask before anything
    ambiguous or risky. Verify by building and by exercising logic on the host — don't boot a
    simulator to go and look. The report's screenshots are the real app on the real device, and the
