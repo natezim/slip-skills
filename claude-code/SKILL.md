@@ -245,12 +245,13 @@ user, and clear every open question *before* touching code.
 tagged `now` first (§2); then every defect before any idea; aged notes (`deferredRuns`) ahead of
 fresh ones inside each group; within defects, data-loss > crash > broken-interaction > cosmetic. For each cluster give: what the user is asking
 for, the note(s) behind it, the real code it touches (`file:line`, never a guess), your intended
-response in a sentence, and whether you'll do it inline or hand it to a subagent (§5). Flag anything
-you'd otherwise be guessing at.
+response in a sentence, and which agent gets it (§5) — or, rarely, that it's the inline exception.
+Flag anything you'd otherwise be guessing at.
 
-Size is a routing decision, not a filter: a cluster being large is what sends it to a subagent, and
-never what keeps it off the plan. Every note **in this pull** appears somewhere in the plan — and on
-a sliced batch (§1), say in a line what's behind it: "25 shown, 103 open, 78 not yet read."
+Size shapes how a cluster is cut, never whether it's planned: a large one is split into more
+agent-sized clusters (§5), and is never what keeps work off the plan. Every note **in this pull**
+appears somewhere in the plan — and on a sliced batch (§1), say in a line what's behind it: "25
+shown, 103 open, 78 not yet read."
 
 **Not every note resolves to a diff.** A prompt may be best answered with an answer, a
 recommendation, a design to agree on first, or a reasoned "we shouldn't build this" — all legitimate
@@ -333,23 +334,29 @@ exactly when it's least revisable. It's also the cheapest moment to be redirecte
 you is committed and receipted, so nothing is lost by changing course here. Ideas are where a batch runs long, so a run that gets cut short should
 cost the user ideas, never fixes. Inside each pass, aged notes (§1) go ahead of fresh ones.
 
-**Delegate only the clusters that would otherwise cost you the run.** A subagent starts cold: it
-re-reads what you already have loaded, re-derives what you already know, and hands back a summary
-you then have to verify. That overhead is real and you pay it per agent — delegate reflexively and
-a batch of small fixes takes hours it didn't need to.
+**This run is the PM: every implementation cluster goes to an Opus-pinned subagent, and you don't
+edit app code yourself.** (Nathan, 2026-08-12: *"you are the PM you must delegate to Opus."*) The
+failure this is tuned against is a run that reads a batch well and builds it badly, so the job splits
+along that seam. Yours is everything that needs the whole batch in view: pulling it, opening the
+screenshots, deduping, **locating the real code**, planning, quizzing, then checking what comes back,
+receipting, wrapping up. Writing the diff is not on that list.
 
-So inline is the default, and the test for leaving it is **can you already name the files?**
-
-- **You can** — work it here, however big it looks. A wide but mechanical change across files you
-  have open is cheap: you know where every edit goes, and a subagent would only re-derive that.
-- **You can't** — the cluster's first step is *finding out where this lives* — hand it to a
-  `general-purpose` subagent via the Agent tool. That search is the unbounded part, it's what ends a
-  twelve-note batch at note five, and it's the same reason reading fans out below.
-
-Size is the wrong dial, and reaching for it is how this rule drifts: a 400-line edit across known
-files costs little, while a three-file bug in a subsystem nobody has read costs the run. The
-searching is the expense, not the diff. Every cluster you keep is also one you don't have to check
-afterwards.
+- **Pin the model on the Agent call — `model: "opus"`.** The alias tracks the session's current Opus
+  version, so it stays right with no version string to rot. Prefer a project-registered
+  implementer-type agent where one exists (this workspace has `implementer`); fall back to
+  `general-purpose`, carrying the same pin either way.
+- **This holds whatever the primary session runs** — Fable, Opus, anything: the primary is the PM
+  regardless. That's the whole point of pinning rather than deciding per run. Build quality is set by
+  the agent's model, not the primary's, so the user picks a session model for how the *conversation*
+  should go and the code lands the same.
+- **Locating stays with you, and it's what makes the brief cheap.** You already have the repo and the
+  batch loaded; three greps here save an agent the expensive half of its run. A brief that says "go
+  find where this lives" spends that run on the part you could have handed over as `file:line` — and
+  you still have to check it afterwards.
+- **No cluster is ever "small enough to keep."** Size was the old dial and it's gone: the reason to
+  delegate is no longer context, it's who writes. The one thing you may still do in place is a
+  trivial mechanical touch you turn up while verifying a returned result — a typo in a comment, a
+  receipt correction — where a round-trip costs more than the edit does.
 
 The brief is the whole job, because the subagent starts cold and can't see the batch:
 - the note text (reconstructed per §2, never the garbled literal), its `noteId`, and the **absolute
@@ -372,10 +379,11 @@ away, and what survives is one line per note. Write their entries to the triage 
 plan, so the round is cheap to resume even if it ends early.
 
 **Where a project's own rules say not to spawn agents without being asked, invoking this skill is
-that ask — for the read-only triage fan-out only.** It writes nothing, it's the one place the payoff
-is unambiguous, and a hundred-note backlog is unworkable without it. A subagent that *writes* still
-needs the user's say-so in so many words: put it to them as a §4 question naming the cluster and why
-it can't be worked inline, and work it here if they'd rather.
+that ask — for the read-only triage fan-out *and* for the Opus implementation agents.** Nathan set
+this flow himself (2026-08-12), so it is the arrangement, not a liberty you're taking: asking
+per-cluster "may I delegate this one?" now spends a round-trip re-confirming something already
+agreed, and a hundred-note backlog is unworkable either way. What still needs the user is what always
+did — §4's design and scope questions, and anything destructive or outward-facing (§intro).
 
 **A subagent's report is a claim, not a result.** Before its cluster counts as done, confirm the SHA
 is real (`git log -1 <sha> --stat`) and that what it verified is what the note asked for. No SHA or
