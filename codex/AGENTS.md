@@ -17,7 +17,9 @@ When asked to handle Slip reports:
 2. Dedupe notes describing the same issue, then fix what's clearly fixable. Ask before anything
    ambiguous or risky. Verify by building and by exercising logic on the host — don't boot a
    simulator to go and look. The report's screenshots are the real app on the real device, and the
-   next report is the QA result; say plainly when a fix was only compiled.
+   next report is the QA result; say plainly when a fix was only compiled. Reports now tend to be
+   feature-scoped — the phone groups the inbox by feature area (camera, listings) and sends one at a
+   time — and each note's feature rides in as an ordinary tag, a hint for where the code lives.
 3. For each report, write a receipt to `_results/<report-name>.result.json`:
 
    ```json

@@ -18,6 +18,15 @@ them. This skill owns the other half. The deterministic file I/O lives in `slip.
 (dedupe, fixing, verifying) is yours. Full format contract:
 https://github.com/natezim/slip-skills/blob/main/docs/field-report-loop.md
 
+**Reports now arrive feature-scoped.** The app groups the inbox by feature area (camera, listings,
+onboarding) and the user sends one feature-batch — or a single note — at a time, rather than firing
+off the whole inbox. So a report is usually already one coherent area, and each note's feature rides
+in as an ordinary tag (the frontmatter `tags:` and the per-note `· camera` heading). Two things
+follow: dedupe/cluster (§3) starts from notes that already belong together, and `list --tag <feature>`
+pulls a single area (§1). A small, tightly-scoped report is the user curating on purpose — the
+finished batch, not a half-done capture — so work it as the complete thing it is, not as a fragment
+waiting for the rest.
+
 **Each note is a prompt.** These are not bug tickets to be triaged and stamped — they're the user
 thinking, captured on a phone mid-use, usually with a screenshot standing in for the context they'd
 otherwise have had to type. Treat a note exactly as you'd treat the same sentence typed into chat:
@@ -117,11 +126,14 @@ you already understood. Reach for it first on any re-run.
 ```
 python3 ~/.claude/skills/slip/slip.py list --tag now          # first, always — see §2
 python3 ~/.claude/skills/slip/slip.py list --new --tag bug --tag untagged --limit 25
+python3 ~/.claude/skills/slip/slip.py list --new --tag camera --limit 25   # one feature area at a time
 ```
 
 - `--new` — drop the notes a past run already read and summarized.
 - `--tag <t>` (repeatable) — `--tag bug --tag untagged` is the defect pass; `untagged` is not
   optional there, since Slip only seeds `bug`/`idea` and a dictated note often carries neither.
+  Feature areas are ordinary tags too (§intro): `--tag camera` narrows to one area, a natural slice
+  axis on a big backlog when you'd rather clear one feature end-to-end than skim the whole thing.
 - `--limit N` — the first N open notes, oldest first; sets `truncated` when it holds some back.
 
 The counts stay global whatever you narrow to: `pendingNoteCount` is the whole backlog,
@@ -170,6 +182,9 @@ and re-run with `--app-dir <path>` — or, to make it stick, add `.claude/slip.j
   wants talking through before any code exists. Answer the prompt that was written.
 - Tags are freeform (Slip seeds `bug`/`idea`). Untagged? Infer softly: wrong-behavior wording
   → bug; wants ("I want", "add") → idea/feature.
+- **A feature tag names the subsystem the note is about** (camera, listings, onboarding) — the app's
+  own on-device pass assigned it. Treat it as a strong hint for where the code lives, so you locate
+  it faster, but verify against the repo: it's the user's rough area, not a `file:line`.
 - **`now` is not a kind — it's the user's own priority call**, tapped on the phone at capture. It
   outranks anything you would infer from wording, and it outranks the bug/idea split: a `now` idea
   goes ahead of a bug nobody flagged. They were looking at the problem when they tapped it; you're
@@ -204,6 +219,11 @@ considered phrasing.
 Use `duplicateHints` plus your own reading to merge notes describing the **same underlying issue**
 (a batch may report one bug several times). Fix it **once**; the extra notes get `status: duplicate`
 pointing at the primary note's `noteId`.
+
+A feature-scoped report (§intro) hands you notes that already share an area, which makes real
+duplicates easier to spot — but same-feature is not same-issue. Two distinct camera bugs are two
+clusters, not one; merge only what's genuinely the same underlying thing, and let the shared feature
+speed the reading, not collapse the work.
 
 **`possibleRepeatOf` means the opposite of "already handled."** A pending note carrying it closely
 echoes one that a past receipt already closed — the hint gives you that note's id, report, status,

@@ -89,6 +89,11 @@ Rules:
 - The comment sits between a note's `## N.` heading and its body; strip it before treating the rest
   as note text.
 - An empty note body (`_(no note)_`) means a **screenshot-only** capture; the image is the content.
+- `tags` (frontmatter list and the per-note `· a, b` heading suffix) are freeform. Beyond the seeded
+  `bug`/`idea`, a note may carry a **feature area** the app sorted it into (camera, listings,
+  onboarding). Since the phone now groups the inbox by feature and sends one area at a time, a report
+  is usually one coherent feature — the area is an ordinary tag, so a resolver can filter or group on
+  it with no special handling.
 - Image paths are relative to the report `.md` (a bare `<yyyy-MM-dd>-<HHmm>-NNN.<ext>` beside it), so
   they resolve the same for a person or a tool.
 - **Never infer an image's extension — follow the link.** A project folder may hold both `.png` and
@@ -164,7 +169,11 @@ clears its resolved status and pulls it back out of the Fixes box.
 ## Loop, end to end
 
 1. **Capture** (phone) — note created; optional on-device tidy/auto-tag runs at finalize.
-2. **Export** (phone) — writes `<yyyy-MM-dd>-<HHmm>-<slug>.md` (ids embedded) + images, flat in `Slip/<Project>/`.
+1a. **Organize** (phone, optional) — an on-device pass sorts the inbox into feature areas (camera,
+   listings…), written as an ordinary tag per note, so the user can review and send by feature.
+2. **Export** (phone) — writes `<yyyy-MM-dd>-<HHmm>-<slug>.md` (ids embedded) + images, flat in
+   `Slip/<Project>/`. The user sends one feature area — or a single note — at a time, so each report
+   tends to be one coherent batch rather than the whole inbox.
 3. **Fix** (resolver, e.g. the `slip` skill on the Mac) — parse reports, dedupe/cluster, fix,
    **verify**, commit.
 4. **Receipt** (resolver) — write `_results/…result.json`. Nothing is moved: the receipt is the state.
